@@ -200,7 +200,7 @@ def merge_and_write(store_pages_map: Dict[str, List], store_order: List[str], ou
                 writer.add_page(p)
         else:
             if logger:
-                logger.warning("Missing PO for code: %s", code)
+                logger.warning("Không có mã cửa hàng: %s", code)
 
     extras = [c for c in found if c not in expected]
     if extras and logger:
@@ -264,7 +264,7 @@ class POApp(tk.Tk):
         # Row 2 - list file
         list_frame = ttk.Frame(frm)
         list_frame.pack(fill=tk.X, pady=4)
-        tk.Label(list_frame, text="Danh sách mã (CSV/TXT):",
+        tk.Label(list_frame, text="Danh sách mã cửa hàng (CSV/TXT):",
                  font=("Arial", 12, "bold")).pack(side=tk.LEFT)
         self.list_var = tk.StringVar()
         self.list_entry = ttk.Entry(list_frame, textvariable=self.list_var)
@@ -376,7 +376,7 @@ class POApp(tk.Tk):
             return
         if not list_val or not Path(list_val).exists():
             messagebox.showerror(
-                "Lỗi", "Vui lòng chọn file danh sách mã (CSV/TXT) hợp lệ.")
+                "Lỗi", "Vui lòng chọn file danh sách mã cửa hàng (CSV/TXT) hợp lệ.")
             return
         # disable start button during work
         self.start_btn.config(state=tk.DISABLED)
@@ -418,10 +418,10 @@ class POApp(tk.Tk):
             missing = expected_codes - found_codes
             extra = found_codes - expected_codes
             if missing:
-                log.warning("Missing codes (in list but not found in PDFs): %s", ", ".join(
+                log.warning("Không tìm thấy mã cửa hàng (Có trong list nhưng không có trong file PDF): %s", ", ".join(
                     list(missing)[:20]) + ("" if len(missing) <= 20 else " ..."))
             if extra:
-                log.warning("Extra detected codes (found in PDFs but not in list): %s", ", ".join(
+                log.warning("Dư mã cửa hàng (Có trong file PDF nhưng không có trong list): %s", ", ".join(
                     list(extra)[:20]) + ("" if len(extra) <= 20 else " ..."))
 
             merge_and_write(result.store_pages, store_order,
