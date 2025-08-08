@@ -9,7 +9,7 @@ from tqdm import tqdm
 input_pdfs = ["PO/PO-BatchDetailsReport.pdf", "PO/PO-BatchDetailsReport1.pdf",
               "PO/PO-BatchDetailsReport2.pdf"]  # Các file gốc
 store_list_file = "ListMCH.csv"  # Danh sách mã cửa hàng chuẩn (mỗi dòng 1 mã)
-output_file = "PO_FINAL.pdf"
+output_file = "PO/PO_FINAL.pdf"
 pattern = r"SG\d{4}"
 
 # ===== LOAD STORE LIST =====
@@ -17,6 +17,8 @@ with open(store_list_file, "r", encoding="utf-8") as f:
     store_order = [line.strip() for line in f if line.strip()]
 
 # ===== HÀM TÁCH PO =====
+
+
 def split_pos_from_pdfs(pdf_files):
     """Trả về dict {ma_cua_hang: [list_page_objects]}"""
     store_pages = {}
