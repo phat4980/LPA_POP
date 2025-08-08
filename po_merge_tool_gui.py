@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import datetime
 import logging
 import re
 import threading
@@ -239,7 +240,7 @@ class POApp(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("PO Merge Tool")
-        self.geometry("820x540")
+        self.geometry("900x600")
         self._build_ui()
         self._worker_thread: Optional[threading.Thread] = None
 
@@ -248,7 +249,8 @@ class POApp(tk.Tk):
         frm.pack(fill=tk.BOTH, expand=True)
 
         # Row 1 - inputs
-        inp_frame = ttk.LabelFrame(frm, text="Input PDFs")
+        inp_frame = tk.LabelFrame(
+            frm, text="Chọn các file PO", font=("Arial", 12, "bold"))
         inp_frame.pack(fill=tk.X, pady=4)
         self.input_paths_var = tk.StringVar(value="")
         inp_row = ttk.Frame(inp_frame)
@@ -262,39 +264,36 @@ class POApp(tk.Tk):
         # Row 2 - list file
         list_frame = ttk.Frame(frm)
         list_frame.pack(fill=tk.X, pady=4)
-        ttk.Label(list_frame, text="Danh sách mã (CSV/TXT):").pack(side=tk.LEFT)
+        tk.Label(list_frame, text="Danh sách mã (CSV/TXT):",
+                 font=("Arial", 12, "bold")).pack(side=tk.LEFT)
         self.list_var = tk.StringVar()
         self.list_entry = ttk.Entry(list_frame, textvariable=self.list_var)
         self.list_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=6)
         ttk.Button(list_frame, text="Chọn...",
                    command=self._choose_list).pack(side=tk.LEFT)
 
-        # Row 3 - output and regex
+        # Row 3 - output
         out_frame = ttk.Frame(frm)
         out_frame.pack(fill=tk.X, pady=4)
-        ttk.Label(out_frame, text="Output PDF:").pack(side=tk.LEFT)
-        self.output_var = tk.StringVar(value="PO_FINAL.pdf")
+        tk.Label(out_frame, text="Chỗ lưu PO:", font=(
+            "Arial", 12, "bold")).pack(side=tk.LEFT)
+        # Tạo tên file theo ngày hiện tại, format PO_DDMMYYYY.pdf
+        today_str = datetime.datetime.now().strftime("%d%m%Y")
+        default_output_name = f"PO_{today_str}.pdf"
+        self.output_var = tk.StringVar(value=default_output_name)
         self.output_entry = ttk.Entry(out_frame, textvariable=self.output_var)
         self.output_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=6)
         ttk.Button(out_frame, text="Chọn...",
                    command=self._choose_output).pack(side=tk.LEFT)
 
-        pattern_frame = ttk.Frame(frm)
-        pattern_frame.pack(fill=tk.X, pady=4)
-        ttk.Label(pattern_frame, text="Regex (mặc định):").pack(side=tk.LEFT)
-        self.pattern_var = tk.StringVar(value=DEFAULT_PATTERN)
-        self.pattern_entry = ttk.Entry(
-            pattern_frame, textvariable=self.pattern_var)
-        self.pattern_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=6)
-
         # Buttons
         btn_frame = ttk.Frame(frm)
         btn_frame.pack(fill=tk.X, pady=6)
-        self.start_btn = ttk.Button(
-            btn_frame, text="Bắt đầu", command=self._on_start)
+        self.start_btn = tk.Button(
+            btn_frame, text="Bắt đầu", font=("Arial", 8, "bold"), command=self._on_start)
         self.start_btn.pack(side=tk.LEFT, padx=6)
-        ttk.Button(btn_frame, text="Mở thư mục output",
-                   command=self._open_output_dir).pack(side=tk.LEFT)
+        tk.Button(btn_frame, text="Mở thư mục output", font=("Arial", 8, "bold"),
+                  command=self._open_output_dir).pack(side=tk.LEFT)
 
         # Progress
         self.progress = ttk.Progressbar(
@@ -365,7 +364,7 @@ class POApp(tk.Tk):
         input_val = self.input_paths_var.get().strip()
         list_val = self.list_var.get().strip()
         output_val = self.output_var.get().strip()
-        pattern = self.pattern_var.get().strip() or DEFAULT_PATTERN
+        pattern = DEFAULT_PATTERN
         if not input_val:
             messagebox.showerror("Lỗi", "Vui lòng chọn file/folder chứa PDF.")
             return
@@ -437,7 +436,7 @@ class POApp(tk.Tk):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="PO Merge Tool - extract store code and merge PDFs in order")
+        description="PO Merge Tool - Trích xuất và hợp nhất Purchase Order theo thứ tự")
     parser.add_argument(
         "--input-folder", help="Folder chứa các PDF (tất cả .pdf trong folder sẽ theo thứ tự alpha)")
     parser.add_argument("--input-files", nargs="*",

@@ -1,3 +1,11 @@
+"""
+POP - Sample code to process PDF files containing Purchase Orders (POs).
+It extracts POs based on store codes, checks for missing or extra POs,
+and merges them into a final PDF in the specified order.
+
+CLI only, no GUI.
+"""
+
 import pdfplumber
 from PyPDF2 import PdfReader, PdfWriter
 import re
