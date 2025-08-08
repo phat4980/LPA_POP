@@ -3,9 +3,11 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+.venv/
 
-# PDF output
+# PDF outputs
 PO_FINAL.pdf
+PO/*.pdf
 
 # VS Code
 .vscode/
@@ -21,5 +23,16 @@ Thumbs.db
 *.log
 *.bak
 
-# Ignore PO PDFs (if output generated)
-PO/*.pdf
+# CSV data
+ListMCH.csv
+
+# Executables
+*.exe
+*.spec
+
+# PyInstaller build
+dist/
+build/
+
+# Ignore test artifacts
+test_*.pdf
