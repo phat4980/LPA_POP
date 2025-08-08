@@ -292,7 +292,7 @@ class POApp(tk.Tk):
         self.start_btn = tk.Button(
             btn_frame, text="Bắt đầu", font=("Arial", 8, "bold"), command=self._on_start)
         self.start_btn.pack(side=tk.LEFT, padx=6)
-        tk.Button(btn_frame, text="Mở thư mục output", font=("Arial", 8, "bold"),
+        tk.Button(btn_frame, text="Mở thư mục PO", font=("Arial", 8, "bold"),
                   command=self._open_output_dir).pack(side=tk.LEFT)
 
         # Progress
@@ -338,8 +338,14 @@ class POApp(tk.Tk):
             self.list_var.set(f)
 
     def _choose_output(self):
-        f = filedialog.asksaveasfilename(title="Chọn nơi lưu file output", defaultextension=".pdf", filetypes=[
-                                         ("PDF", "*.pdf")], initialfile="PO_FINAL.pdf")
+        today_str = datetime.datetime.now().strftime("%d%m%Y")
+        default_output_name = f"PO_{today_str}.pdf"
+        f = filedialog.asksaveasfilename(
+            title="Chọn nơi lưu file output",
+            defaultextension=".pdf",
+            filetypes=[("PDF", "*.pdf")],
+            initialfile=default_output_name  # Luôn cập nhật tên theo ngày hiện tại
+        )
         if f:
             self.output_var.set(f)
 
