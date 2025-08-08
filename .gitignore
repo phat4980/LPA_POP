@@ -1,0 +1,25 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# PDF output
+PO_FINAL.pdf
+
+# VS Code
+.vscode/
+
+# OS
+Thumbs.db
+.DS_Store
+
+# TQDM cache
+.tqdm_cache/
+
+# Misc
+*.log
+*.bak
+
+# Ignore PO PDFs (if output generated)
+PO/*.pdf
