@@ -27,6 +27,7 @@ import re
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+import sys
 from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 try:
@@ -363,9 +364,12 @@ def annotate_quantities(pdf_path: Path, logger: Optional[logging.Logger] = None,
 
         # Annotate PDF
         with fitz.open(str(pdf_path)) as doc:
-            # Require Roboto-ExtraBold font from local font folder
-            roboto_path = (Path(__file__).parent / "font" /
-                           "Roboto-ExtraBold.ttf").resolve()
+            # Require Roboto-ExtraBold font from local font folder (supports PyInstaller)
+            def resource_path(*parts: str) -> Path:
+                base = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
+                return (base / Path(*parts)).resolve()
+
+            roboto_path = resource_path("font", "Roboto-ExtraBold.ttf")
             if not roboto_path.exists():
                 raise FileNotFoundError(
                     f"Không tìm thấy font Roboto tại: {roboto_path}")

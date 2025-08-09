@@ -8,7 +8,7 @@ Công cụ hợp nhất các file PO PDF theo danh sách mã cửa hàng, hỗ t
 
 - Python 3.8 trở lên
 - Windows (khuyến nghị)
-- Các thư viện: PyPDF2, pdfplumber, pillow
+- Các thư viện: PyPDF2, pdfplumber, pillow, PyMuPDF (fitz)
 
 ---
 
@@ -47,8 +47,11 @@ python po_merge_tool_gui.py --input-folder ./pdfs --list-file stores.csv --outpu
 - `--input-folder`: Thư mục chứa các file PDF cần hợp nhất
 - `--input-files`: Danh sách file PDF hoặc thư mục (có thể truyền nhiều)
 - `--list-file`: File danh sách mã cửa hàng (CSV hoặc TXT)
+  - CSV có thể 1 cột (mỗi dòng 1 mã) hoặc 2 cột (cột 1: mã, cột 2: tên cửa hàng). Nếu có tên, log thiếu mã theo từng mã sẽ kèm tên.
 - `--output`: Đường dẫn file PDF kết quả
-- `--pattern`: Regex để nhận diện mã PO (mặc định: SGxxxx)
+- `--pattern`: Regex để nhận diện mã PO (mặc định: `SG\d{4}`)
+
+Gợi ý: có thể truyền nhiều file theo `--input-files` hoặc chỉ định 1 thư mục qua `--input-folder`.
 
 ---
 
@@ -57,7 +60,7 @@ python po_merge_tool_gui.py --input-folder ./pdfs --list-file stores.csv --outpu
 ### a. Cài đặt PyInstaller
 
 ```sh
-pip install pyinstaller (nếu đã có trong venv thì bỏ qua)
+pip install pyinstaller  # nếu đã có trong venv thì bỏ qua
 ```
 
 ### b. Build EXE
@@ -67,7 +70,7 @@ pyinstaller --onefile --windowed po_merge_tool_gui.py
 ```
 
 - File EXE sẽ nằm trong thư mục `dist`
-- Nếu muốn icon riêng: thêm `--icon=icon.ico`
+- Nếu muốn icon riêng: thêm `--icon=assets/app.ico`
 
 ### c. Chạy file EXE
 
@@ -79,9 +82,11 @@ dist\po_merge_tool_gui.exe
 
 ## 5. Lưu ý
 
-- File log sẽ được ghi tại `po_merge_tool.log`
-- Đảm bảo các file PDF và danh sách mã cửa hàng đã đúng định dạng
-- Nếu gặp lỗi về Tkinter, hãy kiểm tra lại cài đặt Python hoặc dùng CLI
+- File log sẽ được ghi tại `po_merge_tool.log`.
+- Danh sách mã (`--list-file`) có thể là TXT (mỗi dòng 1 mã) hoặc CSV (1 hoặc 2 cột). Khi CSV có 2 cột, log thiếu mã theo từng mã sẽ hiển thị "mã - tên".
+- Khi hợp nhất xong, công cụ sẽ: (1) cảnh báo "thiếu" và "dư" mã, (2) cộng tổng số lượng sau chia 2 và log theo định dạng: `Tổng số lượng ngày DD/MM/YYYY: <tổng>`.
+- Công cụ thêm số lượng (đã chia 2) vào góc phải dưới của từng trang bằng font hệ thống `helv`.
+- Nếu gặp lỗi về Tkinter, hãy kiểm tra lại cài đặt Python hoặc dùng CLI.
 
 ---
 
