@@ -8,6 +8,8 @@ __pycache__/
 # PDF outputs
 PO_FINAL.pdf
 PO/*.pdf
+output
+test
 
 # VS Code
 .vscode/

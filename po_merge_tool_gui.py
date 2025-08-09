@@ -38,6 +38,7 @@ except Exception:
 
 import pdfplumber
 from PyPDF2 import PdfReader, PdfWriter
+import fitz  # Add this with other imports
 
 LOGFILE = "po_merge_tool.log"
 DEFAULT_PATTERN = r"\bSG\d{4}\b"
@@ -189,10 +190,16 @@ def extract_store_pages(pdf_files: List[Path], pattern: str, progress_cb: Option
 
 
 def merge_and_write(store_pages_map: Dict[str, List], store_order: List[str], output_file: Path,
-                    logger: Optional[logging.Logger] = None) -> None:
+                    logger: Optional[logging.Logger] = None, progress_cb: Optional[Callable[[int, int], None]] = None) -> None:
     writer = PdfWriter()
     expected = [s.upper() for s in store_order]
     found = list(store_pages_map.keys())
+
+    # Merge pages
+    # +2 for merging and annotation steps
+    total_steps = len(expected) + \
+        len([c for c in found if c not in expected]) + 2
+    current_step = 0
 
     for code in expected:
         if code in store_pages_map:
@@ -201,6 +208,9 @@ def merge_and_write(store_pages_map: Dict[str, List], store_order: List[str], ou
         else:
             if logger:
                 logger.warning("Không có mã cửa hàng: %s", code)
+        current_step += 1
+        if progress_cb:
+            progress_cb(current_step, total_steps)
 
     extras = [c for c in found if c not in expected]
     if extras and logger:
@@ -209,12 +219,84 @@ def merge_and_write(store_pages_map: Dict[str, List], store_order: List[str], ou
         for code in extras:
             for p in store_pages_map[code]:
                 writer.add_page(p)
+            current_step += 1
+            if progress_cb:
+                progress_cb(current_step, total_steps)
 
+    # Write merged PDF
     output_file.parent.mkdir(parents=True, exist_ok=True)
     with output_file.open("wb") as f:
         writer.write(f)
     if logger:
-        logger.info("Output written: %s", output_file)
+        logger.info("Merged PDF written: %s", output_file)
+
+    current_step += 1
+    if progress_cb:
+        progress_cb(current_step, total_steps)
+
+    # Add quantity annotations
+    try:
+        if logger:
+            logger.info("Thêm các chú thích số lượng...")
+        annotate_quantities(output_file, logger)
+        current_step += 1
+        if progress_cb:
+            progress_cb(current_step, total_steps)
+    except Exception as e:
+        if logger:
+            logger.error(f"Failed to add quantities: {e}")
+
+
+# Thêm function này sau các functions hiện có và trước class POApp
+def annotate_quantities(pdf_path: Path, logger: Optional[logging.Logger] = None) -> None:
+    """Extract and annotate order quantities on each page."""
+    if logger is None:
+        logger = logging.getLogger("po_merge_tool")
+
+    def get_qty_from_table(page) -> Optional[int]:
+        try:
+            table = page.extract_table()
+            if table:
+                for row in table:
+                    if not row or "order" in str(row).lower():
+                        continue
+                    try:
+                        qty = int(row[7])  # column 8 (index 7)
+                        return qty // 2
+                    except (ValueError, IndexError, TypeError):
+                        continue
+        except Exception as e:
+            logger.debug(f"Failed extracting table from page: {e}")
+        return None
+
+    try:
+        tmp_path = pdf_path.with_stem(pdf_path.stem + "_tmp")
+        with pdfplumber.open(str(pdf_path)) as pdf:
+            total_pages = len(pdf.pages)
+            qty_values = []
+
+            # Extract quantities
+            for i, page in enumerate(pdf.pages):
+                qty = get_qty_from_table(page)
+                qty_values.append(qty)
+
+        # Annotate PDF
+        with fitz.open(str(pdf_path)) as doc:
+            for i, (page, qty) in enumerate(zip(doc, qty_values)):
+                if qty is not None:
+                    text = str(qty)
+                    x, y = page.rect.width - 30, page.rect.height - 8
+                    page.insert_text((x, y), text, fontsize=10,
+                                     color=(1, 0, 0), fontname="helv")
+            doc.save(str(tmp_path))
+
+        # Replace original with annotated version
+        tmp_path.replace(pdf_path)
+        logger.info("Added quantity annotations to output PDF")
+
+    except Exception as e:
+        logger.error(f"Failed to process quantities: {e}")
+        raise
 
 
 # -----------------------
@@ -425,7 +507,9 @@ class POApp(tk.Tk):
                     list(extra)[:20]) + ("" if len(extra) <= 20 else " ..."))
 
             merge_and_write(result.store_pages, store_order,
-                            Path(output_file), logger=log)
+                            Path(output_file), logger=log,
+                            progress_cb=progress_cb)  # Add progress_cb here
+
             log.info("Hoàn tất. Output: %s", output_file)
             try:
                 messagebox.showinfo(
