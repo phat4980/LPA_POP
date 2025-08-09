@@ -191,16 +191,30 @@ def extract_store_pages(pdf_files: List[Path], pattern: str, progress_cb: Option
 
 def merge_and_write(store_pages_map: Dict[str, List], store_order: List[str], output_file: Path,
                     logger: Optional[logging.Logger] = None, progress_cb: Optional[Callable[[int, int], None]] = None) -> None:
+    """Merge pages following store_order, then annotate quantities, then export final file.
+
+    The merged content is first written to a temporary PDF. Quantities are annotated
+    onto that temporary file. Only after successful annotation will the result be
+    moved to the requested output path. If annotation fails, no final output file
+    is produced.
+    """
     writer = PdfWriter()
     expected = [s.upper() for s in store_order]
     found = list(store_pages_map.keys())
 
-    # Merge pages
-    # +2 for merging and annotation steps
-    total_steps = len(expected) + \
-        len([c for c in found if c not in expected]) + 2
+    # Determine extras and count total pages to be merged
+    extras = [c for c in found if c not in expected]
+    expected_pages_count = sum(
+        len(store_pages_map[c]) for c in expected if c in store_pages_map)
+    extras_pages_count = sum(len(store_pages_map[c]) for c in extras)
+    merged_pages_total = expected_pages_count + extras_pages_count
+
+    # Progress steps: per-code merge ticks + 1 (write temp) + per-page annotate ticks (2x pages) + 1 (finalize)
+    annotate_ticks = merged_pages_total * 2
+    total_steps = len(expected) + len(extras) + 1 + annotate_ticks + 1
     current_step = 0
 
+    # Merge in expected order
     for code in expected:
         if code in store_pages_map:
             for p in store_pages_map[code]:
@@ -212,43 +226,67 @@ def merge_and_write(store_pages_map: Dict[str, List], store_order: List[str], ou
         if progress_cb:
             progress_cb(current_step, total_steps)
 
-    extras = [c for c in found if c not in expected]
+    # Append extras at the end
     if extras and logger:
         logger.info("Appending %d extra detected codes at end: %s", len(
             extras), ", ".join(extras[:10]) + ("..." if len(extras) > 10 else ""))
-        for code in extras:
-            for p in store_pages_map[code]:
-                writer.add_page(p)
-            current_step += 1
-            if progress_cb:
-                progress_cb(current_step, total_steps)
+    for code in extras:
+        for p in store_pages_map[code]:
+            writer.add_page(p)
+        current_step += 1
+        if progress_cb:
+            progress_cb(current_step, total_steps)
 
-    # Write merged PDF
+    # Ensure output directory exists
     output_file.parent.mkdir(parents=True, exist_ok=True)
-    with output_file.open("wb") as f:
+
+    # Write merged PDF to a temporary file first
+    tmp_merged = output_file.parent / \
+        f"{output_file.stem}__merged_tmp{output_file.suffix}"
+    with tmp_merged.open("wb") as f:
         writer.write(f)
     if logger:
-        logger.info("Merged PDF written: %s", output_file)
+        logger.info("Đã hợp nhất vào file tạm: %s", tmp_merged)
 
     current_step += 1
     if progress_cb:
         progress_cb(current_step, total_steps)
 
-    # Add quantity annotations
+    # Annotate quantities on the temporary merged PDF (with per-page progress)
     try:
         if logger:
             logger.info("Thêm các chú thích số lượng...")
-        annotate_quantities(output_file, logger)
-        current_step += 1
-        if progress_cb:
-            progress_cb(current_step, total_steps)
+
+        def on_tick():
+            nonlocal current_step
+            current_step += 1
+            if progress_cb:
+                progress_cb(current_step, total_steps)
+
+        annotate_quantities(tmp_merged, logger, on_tick=on_tick)
     except Exception as e:
         if logger:
             logger.error(f"Failed to add quantities: {e}")
+        # Do not export final file if annotation fails
+        raise
+
+    current_step += 1
+    if progress_cb:
+        progress_cb(current_step, total_steps)
+
+    # Move annotated temp file to final output path
+    tmp_merged.replace(output_file)
+    if logger:
+        logger.info("Xuất file PDF cuối cùng: %s", output_file)
+
+    current_step += 1
+    if progress_cb:
+        progress_cb(current_step, total_steps)
 
 
 # Thêm function này sau các functions hiện có và trước class POApp
-def annotate_quantities(pdf_path: Path, logger: Optional[logging.Logger] = None) -> None:
+def annotate_quantities(pdf_path: Path, logger: Optional[logging.Logger] = None,
+                        on_tick: Optional[Callable[[], None]] = None) -> None:
     """Extract and annotate order quantities on each page."""
     if logger is None:
         logger = logging.getLogger("po_merge_tool")
@@ -279,6 +317,11 @@ def annotate_quantities(pdf_path: Path, logger: Optional[logging.Logger] = None)
             for i, page in enumerate(pdf.pages):
                 qty = get_qty_from_table(page)
                 qty_values.append(qty)
+                if on_tick:
+                    try:
+                        on_tick()
+                    except Exception:
+                        pass
 
         # Annotate PDF
         with fitz.open(str(pdf_path)) as doc:
@@ -288,11 +331,16 @@ def annotate_quantities(pdf_path: Path, logger: Optional[logging.Logger] = None)
                     x, y = page.rect.width - 30, page.rect.height - 8
                     page.insert_text((x, y), text, fontsize=10,
                                      color=(1, 0, 0), fontname="helv")
+                if on_tick:
+                    try:
+                        on_tick()
+                    except Exception:
+                        pass
             doc.save(str(tmp_path))
 
         # Replace original with annotated version
         tmp_path.replace(pdf_path)
-        logger.info("Added quantity annotations to output PDF")
+        logger.info("Đã thêm chú thích số lượng vào trong file PO")
 
     except Exception as e:
         logger.error(f"Failed to process quantities: {e}")
@@ -485,16 +533,31 @@ class POApp(tk.Tk):
             store_order = read_store_list(Path(list_file))
             log.info("Danh sách mã load xong: %d mã", len(store_order))
 
-            def progress_cb(done, total):
-                # update progress in UI thread
+            # Progress mapping: extraction 0-70%, merge+annotate+finalize 70-100%
+            def extract_progress(done, total):
                 try:
-                    pct = int(done / total * 100) if total else 0
-                    self.progress['value'] = pct
+                    pct = int((done / total) * 70) if total else 0
+                    self.progress['value'] = max(self.progress['value'], pct)
+                except Exception:
+                    pass
+
+            def merge_progress(done, total):
+                try:
+                    # Map merge/write/annotate/finalize to 70-100 based on relative steps
+                    base = 70
+                    span = 30
+                    pct = base + (int((done / total) * span) if total else 0)
+                    self.progress['value'] = max(self.progress['value'], pct)
                 except Exception:
                     pass
 
             result = extract_store_pages(
-                pdfs, pattern, progress_cb, logger=log)
+                pdfs, pattern, extract_progress, logger=log)
+            # Ensure we land at 70% after extraction
+            try:
+                self.progress['value'] = max(self.progress['value'], 70)
+            except Exception:
+                pass
             found_codes = set(result.store_pages.keys())
             expected_codes = set([c.upper() for c in store_order])
             missing = expected_codes - found_codes
@@ -508,7 +571,7 @@ class POApp(tk.Tk):
 
             merge_and_write(result.store_pages, store_order,
                             Path(output_file), logger=log,
-                            progress_cb=progress_cb)  # Add progress_cb here
+                            progress_cb=merge_progress)
 
             log.info("Hoàn tất. Output: %s", output_file)
             try:
