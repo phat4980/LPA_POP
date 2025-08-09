@@ -84,6 +84,27 @@ def read_store_list(path: Path) -> List[str]:
     return codes
 
 
+def read_code_name_map(path: Path) -> Dict[str, str]:
+    """Read CSV with two columns: store code, store name.
+
+    Returns a mapping code -> name. Codes are normalized to uppercase and trimmed.
+    If the file does not exist, raises FileNotFoundError.
+    """
+    if not path.exists():
+        raise FileNotFoundError(path)
+    mapping: Dict[str, str] = {}
+    with path.open(newline="", encoding="utf-8") as f:
+        rdr = csv.reader(f)
+        for row in rdr:
+            if not row:
+                continue
+            code = str(row[0]).strip().upper() if len(row) >= 1 else ""
+            name = str(row[1]).strip() if len(row) >= 2 else ""
+            if code:
+                mapping[code] = name
+    return mapping
+
+
 def collect_input_pdfs(input_files: Optional[Iterable[str]], input_folder: Optional[str]) -> List[Path]:
     files: List[Path] = []
     if input_folder:
@@ -190,7 +211,8 @@ def extract_store_pages(pdf_files: List[Path], pattern: str, progress_cb: Option
 
 
 def merge_and_write(store_pages_map: Dict[str, List], store_order: List[str], output_file: Path,
-                    logger: Optional[logging.Logger] = None, progress_cb: Optional[Callable[[int, int], None]] = None) -> None:
+                    logger: Optional[logging.Logger] = None, progress_cb: Optional[Callable[[int, int], None]] = None,
+                    code_to_name: Optional[Dict[str, str]] = None) -> None:
     """Merge pages following store_order, then annotate quantities, then export final file.
 
     The merged content is first written to a temporary PDF. Quantities are annotated
@@ -221,7 +243,12 @@ def merge_and_write(store_pages_map: Dict[str, List], store_order: List[str], ou
                 writer.add_page(p)
         else:
             if logger:
-                logger.warning("Không có mã cửa hàng: %s", code)
+                store_name = (code_to_name or {}).get(code)
+                if store_name:
+                    logger.warning(
+                        "Không có mã cửa hàng: %s - %s", code, store_name)
+                else:
+                    logger.warning("Không có mã cửa hàng: %s", code)
         current_step += 1
         if progress_cb:
             progress_cb(current_step, total_steps)
@@ -322,6 +349,17 @@ def annotate_quantities(pdf_path: Path, logger: Optional[logging.Logger] = None,
                         on_tick()
                     except Exception:
                         pass
+
+            # Log total quantity after division by 2 (ignoring pages without quantity)
+            try:
+                total_qty_after_div2 = sum(
+                    q for q in qty_values if q is not None)
+                date_str = datetime.datetime.now().strftime("%d/%m/%Y")
+                logger.info("Tổng số lượng ngày %s: %d",
+                            date_str, total_qty_after_div2)
+            except Exception:
+                # Avoid breaking flow due to logging calculation
+                pass
 
         # Annotate PDF
         with fitz.open(str(pdf_path)) as doc:
@@ -569,9 +607,17 @@ class POApp(tk.Tk):
                 log.warning("Dư mã cửa hàng (Có trong file PDF nhưng không có trong list): %s", ", ".join(
                     list(extra)[:20]) + ("" if len(extra) <= 20 else " ..."))
 
+            # Load optional code->name mapping from the selected list file (supports 1 or 2 columns)
+            code_name_map: Optional[Dict[str, str]] = None
+            try:
+                code_name_map = read_code_name_map(Path(list_file))
+            except Exception:
+                code_name_map = None
+
             merge_and_write(result.store_pages, store_order,
                             Path(output_file), logger=log,
-                            progress_cb=merge_progress)
+                            progress_cb=merge_progress,
+                            code_to_name=code_name_map)
 
             log.info("Hoàn tất. Output: %s", output_file)
             try:
@@ -648,8 +694,15 @@ def main():
         logger.warning("Extra detected codes (found in PDFs but not in list): %s", ", ".join(
             list(extra)[:20]) + ("" if len(extra) <= 20 else " ..."))
 
+    # Load optional code->name mapping from the provided list file (supports 1 or 2 columns)
+    code_name_map: Optional[Dict[str, str]] = None
+    try:
+        code_name_map = read_code_name_map(Path(args.list_file))
+    except Exception:
+        code_name_map = None
+
     merge_and_write(result.store_pages, store_order,
-                    Path(args.output), logger=logger)
+                    Path(args.output), logger=logger, code_to_name=code_name_map)
     logger.info("Done. Logfile: %s", LOGFILE)
 
 
