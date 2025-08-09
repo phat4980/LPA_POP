@@ -363,12 +363,23 @@ def annotate_quantities(pdf_path: Path, logger: Optional[logging.Logger] = None,
 
         # Annotate PDF
         with fitz.open(str(pdf_path)) as doc:
+            # Require Roboto-ExtraBold font from local font folder
+            roboto_path = (Path(__file__).parent / "font" /
+                           "Roboto-ExtraBold.ttf").resolve()
+            if not roboto_path.exists():
+                raise FileNotFoundError(
+                    f"Không tìm thấy font Roboto tại: {roboto_path}")
+            roboto_font_name = "RobotoExtraBold"
+
             for i, (page, qty) in enumerate(zip(doc, qty_values)):
                 if qty is not None:
                     text = str(qty)
-                    x, y = page.rect.width - 30, page.rect.height - 8
-                    page.insert_text((x, y), text, fontsize=10,
-                                     color=(1, 0, 0), fontname="helv")
+                    x, y = page.rect.width - 40, page.rect.height - 1
+                    # Ensure custom font is available on this page
+                    page.insert_font(fontname=roboto_font_name,
+                                     fontfile=str(roboto_path))
+                    page.insert_text((x, y), text, fontsize=20,
+                                     color=(1, 0, 0), fontname=roboto_font_name)
                 if on_tick:
                     try:
                         on_tick()
