@@ -66,7 +66,7 @@ pip install pyinstaller  # nếu đã có trong venv thì bỏ qua
 ### b. Build EXE
 
 ```sh
-pyinstaller --onefile --windowed po_merge_tool_gui.py
+pyinstaller --onefile --windowed po_merge_tool_gui.py --add-data "font/Roboto-ExtraBold.ttf;font"
 ```
 
 - File EXE sẽ nằm trong thư mục `dist`
