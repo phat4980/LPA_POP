@@ -1,4 +1,4 @@
-# PO Merge Tool GUI
+# PO Management Tool GUI
 
 Công cụ hợp nhất các file PO PDF theo danh sách mã cửa hàng, hỗ trợ giao diện đồ họa (GUI) và dòng lệnh (CLI).
 
@@ -7,14 +7,14 @@ Công cụ hợp nhất các file PO PDF theo danh sách mã cửa hàng, hỗ t
 ## 1. Yêu cầu hệ thống
 
 - Python 3.8 trở lên
-- Windows (khuyến nghị)
+- Windows
 - Các thư viện: PyPDF2, pdfplumber, pillow, PyMuPDF (fitz)
 
 ---
 
 ## 2. Cài đặt môi trường
 
-### a. Tạo môi trường ảo (khuyến nghị)
+### a. Tạo môi trường ảo
 
 ```sh
 python -m venv .venv
@@ -44,6 +44,7 @@ python po_merge_tool_gui.py --input-folder ./pdfs --list-file stores.csv --outpu
 ```
 
 **Tham số:**
+
 - `--input-folder`: Thư mục chứa các file PDF cần hợp nhất
 - `--input-files`: Danh sách file PDF hoặc thư mục (có thể truyền nhiều)
 - `--list-file`: File danh sách mã cửa hàng (CSV hoặc TXT)
@@ -57,25 +58,30 @@ Gợi ý: có thể truyền nhiều file theo `--input-files` hoặc chỉ đ�
 
 ## 4. Build file EXE (Windows)
 
-### a. Cài đặt PyInstaller
+### a. Sử dụng file build.bat
 
 ```sh
-pip install pyinstaller  # nếu đã có trong venv thì bỏ qua
+compile\build.bat
 ```
 
-### b. Build EXE
+File build.bat sẽ tự động:
+
+- Cài đặt PyInstaller nếu chưa có
+- Xóa build cũ
+- Build EXE với icon và font
+- Refresh Windows icon cache
+- Tạo file EXE trong thư mục `dist`
+
+### b. Build thủ công (nếu cần tùy chỉnh)
 
 ```sh
-pyinstaller --onefile --windowed po_merge_tool_gui.py --add-data "font/Roboto-ExtraBold.ttf;font"
+pyinstaller --onefile --windowed --name "PO Management Tool" --icon "assets/icon/app.ico" src/po_merge_tool_gui.py --add-data "assets/font/Roboto-ExtraBold.ttf;font" --add-data "assets/icon;icon" --clean
 ```
-
-- File EXE sẽ nằm trong thư mục `dist`
-- Nếu muốn icon riêng: thêm `--icon=assets/app.ico`
 
 ### c. Chạy file EXE
 
 ```sh
-dist\po_merge_tool_gui.exe
+dist\PO Management Tool.exe
 ```
 
 ---

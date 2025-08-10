@@ -23,6 +23,7 @@ import argparse
 import csv
 import datetime
 import logging
+import os
 import re
 import threading
 from dataclasses import dataclass
@@ -43,6 +44,17 @@ import fitz  # Add this with other imports
 
 LOGFILE = "po_merge_tool.log"
 DEFAULT_PATTERN = r"\bSG\d{4}\b"
+
+
+def resource_path(rel_path: str) -> str:
+    """Get absolute path to resource, works for dev and for PyInstaller"""
+    try:
+        # PyInstaller creates a temp folder and stores path in _MEIPASS
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, rel_path)
 
 
 def setup_logging(logfile: str = LOGFILE) -> logging.Logger:
@@ -365,11 +377,7 @@ def annotate_quantities(pdf_path: Path, logger: Optional[logging.Logger] = None,
         # Annotate PDF
         with fitz.open(str(pdf_path)) as doc:
             # Require Roboto-ExtraBold font from local font folder (supports PyInstaller)
-            def resource_path(*parts: str) -> Path:
-                base = Path(getattr(sys, "_MEIPASS", Path(__file__).parent))
-                return (base / Path(*parts)).resolve()
-
-            roboto_path = resource_path("font", "Roboto-ExtraBold.ttf")
+            roboto_path = Path(resource_path("font/Roboto-ExtraBold.ttf"))
             if not roboto_path.exists():
                 raise FileNotFoundError(
                     f"Không tìm thấy font Roboto tại: {roboto_path}")
@@ -422,10 +430,50 @@ class TkLoggerHandler(logging.Handler):
 class POApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("PO Merge Tool")
+        self.title("PO Management Tool")
         self.geometry("900x600")
+
+        # Set application icon
+        self._set_icon()
+
         self._build_ui()
         self._worker_thread: Optional[threading.Thread] = None
+
+    def _set_icon(self):
+        """Set application icon from available icon files using PyInstaller-compatible paths."""
+        try:
+            # Set icon .ico (Windows) - highest priority
+            ico_path = resource_path("icon/app.ico")
+            if os.path.exists(ico_path):
+                print(f"Setting ICO icon from: {ico_path}")
+                self.iconbitmap(ico_path)
+                # Also try to set taskbar icon explicitly
+                try:
+                    import ctypes
+                    myappid = 'lpa.pop.merge.tool.1.0'  # arbitrary string
+                    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                        myappid)
+                except Exception as e:
+                    print(f"Could not set taskbar icon ID: {e}")
+                return
+
+            # Set icon PNG (cross-platform) - fallback
+            png_path = resource_path("icon/LPA-256.png")
+            if os.path.exists(png_path):
+                try:
+                    print(f"Setting PNG icon from: {png_path}")
+                    icon_img = tk.PhotoImage(file=png_path)
+                    self.iconphoto(False, icon_img)
+                    return
+                except Exception as e:
+                    print(f"Could not load PNG icon: {e}")
+
+            # If no icons found, continue without setting icon
+            print("No icon files found in icon/ folder")
+
+        except Exception as e:
+            # Log error but don't crash the application
+            print(f"Could not set application icon: {e}")
 
     def _build_ui(self):
         frm = ttk.Frame(self, padding=10)
