@@ -118,6 +118,28 @@ def read_code_name_map(path: Path) -> Dict[str, str]:
     return mapping
 
 
+def read_code_staff_map(path: Path) -> Dict[str, str]:
+    """Read CSV with store code and staff columns.
+
+    Expected format: store_code, store_name, staff_name
+    Returns a mapping code -> staff. Codes are normalized to uppercase and trimmed.
+    If the file does not exist, raises FileNotFoundError.
+    """
+    if not path.exists():
+        raise FileNotFoundError(path)
+    mapping: Dict[str, str] = {}
+    with path.open(newline="", encoding="utf-8") as f:
+        rdr = csv.reader(f)
+        for row in rdr:
+            if not row or len(row) < 3:
+                continue
+            code = str(row[0]).strip().upper()
+            staff = str(row[2]).strip()
+            if code and staff:
+                mapping[code] = staff
+    return mapping
+
+
 def collect_input_pdfs(input_files: Optional[Iterable[str]], input_folder: Optional[str]) -> List[Path]:
     files: List[Path] = []
     if input_folder:
@@ -225,13 +247,22 @@ def extract_store_pages(pdf_files: List[Path], pattern: str, progress_cb: Option
 
 def merge_and_write(store_pages_map: Dict[str, List], store_order: List[str], output_file: Path,
                     logger: Optional[logging.Logger] = None, progress_cb: Optional[Callable[[int, int], None]] = None,
-                    code_to_name: Optional[Dict[str, str]] = None) -> None:
+                    code_to_name: Optional[Dict[str, str]] = None, code_staff_map: Optional[Dict[str, str]] = None) -> None:
     """Merge pages following store_order, then annotate quantities, then export final file.
 
     The merged content is first written to a temporary PDF. Quantities are annotated
     onto that temporary file. Only after successful annotation will the result be
     moved to the requested output path. If annotation fails, no final output file
     is produced.
+
+    Args:
+        store_pages_map: Mapping of store codes to page objects
+        store_order: List of store codes in desired order
+        output_file: Path for the final output PDF
+        logger: Logger instance for logging
+        progress_cb: Callback function for progress updates
+        code_to_name: Optional mapping of store codes to store names
+        code_staff_map: Optional mapping of store codes to staff names for staff-based quantity totals
     """
     writer = PdfWriter()
     expected = [s.upper() for s in store_order]
@@ -303,7 +334,9 @@ def merge_and_write(store_pages_map: Dict[str, List], store_order: List[str], ou
             if progress_cb:
                 progress_cb(current_step, total_steps)
 
-        annotate_quantities(tmp_merged, logger, on_tick=on_tick)
+        annotate_quantities(tmp_merged, logger, on_tick=on_tick,
+                            store_pages_map=store_pages_map,
+                            code_staff_map=code_staff_map)
     except Exception as e:
         if logger:
             logger.error(f"Failed to add quantities: {e}")
@@ -326,8 +359,18 @@ def merge_and_write(store_pages_map: Dict[str, List], store_order: List[str], ou
 
 # Thêm function này sau các functions hiện có và trước class POApp
 def annotate_quantities(pdf_path: Path, logger: Optional[logging.Logger] = None,
-                        on_tick: Optional[Callable[[], None]] = None) -> None:
-    """Extract and annotate order quantities on each page."""
+                        on_tick: Optional[Callable[[], None]] = None,
+                        store_pages_map: Optional[Dict[str, List]] = None,
+                        code_staff_map: Optional[Dict[str, str]] = None) -> None:
+    """Extract and annotate order quantities on each page.
+
+    Args:
+        pdf_path: Path to the PDF file to annotate
+        logger: Logger instance for logging
+        on_tick: Callback function for progress updates
+        store_pages_map: Mapping of store codes to page objects (from extract_store_pages)
+        code_staff_map: Mapping of store codes to staff names
+    """
     if logger is None:
         logger = logging.getLogger("po_merge_tool")
 
@@ -370,6 +413,52 @@ def annotate_quantities(pdf_path: Path, logger: Optional[logging.Logger] = None,
                 date_str = datetime.datetime.now().strftime("%d/%m/%Y")
                 logger.info("Tổng số lượng ngày %s: %d",
                             date_str, total_qty_after_div2)
+
+                # Calculate and log quantities by staff if mapping is available
+                if store_pages_map and code_staff_map:
+                    staff_totals: Dict[str, int] = {}
+
+                    # Calculate quantities per store code
+                    # We need to track which pages belong to which store codes
+                    # Since pages are merged in order, we can calculate this
+                    current_page = 0
+                    store_qty_map: Dict[str, int] = {}
+
+                    for store_code, pages in store_pages_map.items():
+                        store_total = 0
+                        # Calculate total quantity for this store code
+                        for i in range(len(pages)):
+                            if current_page < len(qty_values) and qty_values[current_page] is not None:
+                                store_total += qty_values[current_page]
+                            current_page += 1
+
+                        if store_total > 0:
+                            store_qty_map[store_code] = store_total
+
+                            # Add to staff total
+                            staff_name = code_staff_map.get(
+                                store_code, "Unknown Staff")
+                            if staff_name not in staff_totals:
+                                staff_totals[staff_name] = 0
+                            staff_totals[staff_name] += store_total
+
+                    # Log staff totals
+                    if staff_totals:
+                        logger.info("=== TỔNG QUANTITY THEO STAFF ===")
+                        for staff_name, total in sorted(staff_totals.items()):
+                            logger.info("Staff %s: %d", staff_name, total)
+                        logger.info("================================")
+
+                    # # Log store code totals for debugging
+                    # if store_qty_map:
+                    #     logger.info("=== TỔNG QUANTITY THEO MÃ CỬA HÀNG ===")
+                    #     for store_code, total in sorted(store_qty_map.items()):
+                    #         store_name = code_staff_map.get(
+                    #             store_code, "Unknown")
+                    #         logger.info("%s (%s): %d", store_code,
+                    #                     store_name, total)
+                    #     logger.info("=======================================")
+
             except Exception:
                 # Avoid breaking flow due to logging calculation
                 pass
@@ -677,10 +766,21 @@ class POApp(tk.Tk):
             except Exception:
                 code_name_map = None
 
+            # Load staff mapping if available
+            code_staff_map: Optional[Dict[str, str]] = None
+            try:
+                code_staff_map = read_code_staff_map(Path(list_file))
+                if code_staff_map:
+                    log.info("Đã load mapping staff cho %d mã cửa hàng",
+                             len(code_staff_map))
+            except Exception:
+                code_staff_map = None
+
             merge_and_write(result.store_pages, store_order,
                             Path(output_file), logger=log,
                             progress_cb=merge_progress,
-                            code_to_name=code_name_map)
+                            code_to_name=code_name_map,
+                            code_staff_map=code_staff_map)
 
             log.info("Hoàn tất. Output: %s", output_file)
             try:
@@ -764,8 +864,20 @@ def main():
     except Exception:
         code_name_map = None
 
+    # Load optional staff mapping from the provided list file (supports 3 columns: code, name, staff)
+    code_staff_map: Optional[Dict[str, str]] = None
+    try:
+        code_staff_map = read_code_staff_map(Path(args.list_file))
+        if code_staff_map:
+            logger.info("Staff mapping loaded for %d store codes",
+                        len(code_staff_map))
+    except Exception:
+        code_staff_map = None
+
     merge_and_write(result.store_pages, store_order,
-                    Path(args.output), logger=logger, code_to_name=code_name_map)
+                    Path(args.output), logger=logger,
+                    code_to_name=code_name_map,
+                    code_staff_map=code_staff_map)
     logger.info("Done. Logfile: %s", LOGFILE)
 
 
