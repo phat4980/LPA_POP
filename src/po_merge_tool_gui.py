@@ -57,6 +57,38 @@ def resource_path(rel_path: str) -> str:
     return os.path.join(base_path, rel_path)
 
 
+def find_font_file() -> str:
+    """Find Roboto font file in various possible locations."""
+    # Try multiple possible paths for the font
+    possible_paths = [
+        "assets/font/Roboto-ExtraBold.ttf",
+        "font/Roboto-ExtraBold.ttf",  # Fallback for old builds
+        "Roboto-ExtraBold.ttf"        # Direct fallback
+    ]
+
+    # Log the search process for debugging
+    # logger = logging.getLogger("po_merge_tool")
+    # logger.info("Tìm kiếm font Roboto-ExtraBold.ttf...")
+
+    for path in possible_paths:
+        full_path = resource_path(path)
+        # logger.debug(f"Thử đường dẫn: {full_path}")
+        if os.path.exists(full_path):
+            # logger.info(f"Tìm thấy font tại: {full_path}")
+            return full_path
+        else:
+            logger.debug(f"Không tìm thấy tại: {full_path}")
+
+    # If none found, raise error with helpful message
+    error_msg = (
+        f"Không tìm thấy font Roboto-ExtraBold.ttf. "
+        f"Đã thử các đường dẫn: {', '.join(possible_paths)}. "
+        f"Vui lòng đảm bảo file font tồn tại trong thư mục assets/font/"
+    )
+    logger.error(error_msg)
+    raise FileNotFoundError(error_msg)
+
+
 def setup_logging(logfile: str = LOGFILE) -> logging.Logger:
     logger = logging.getLogger("po_merge_tool")
     logger.setLevel(logging.INFO)
@@ -138,6 +170,64 @@ def read_code_staff_map(path: Path) -> Dict[str, str]:
             if code and staff:
                 mapping[code] = staff
     return mapping
+
+
+# def create_staff_report(code_staff_map: Dict[str, str], output_dir: Path, logger: Optional[logging.Logger] = None) -> Path:
+#     """Create a comprehensive staff report showing store code mappings.
+
+#     Args:
+#         code_staff_map: Mapping of store codes to staff names
+#         output_dir: Directory to save the report
+#         logger: Logger instance for logging
+
+#     Returns:
+#         Path to the created report file
+#     """
+#     if logger is None:
+#         logger = logging.getLogger("po_merge_tool")
+
+#     # Group by staff
+#     staff_store_summary: Dict[str, List[str]] = {}
+#     for store_code, staff_name in code_staff_map.items():
+#         if staff_name not in staff_store_summary:
+#             staff_store_summary[staff_name] = []
+#         staff_store_summary[staff_name].append(store_code)
+
+#     # Create report filename with timestamp
+#     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+#     report_file = output_dir / f"staff_store_mapping_report_{timestamp}.txt"
+
+#     try:
+#         with report_file.open("w", encoding="utf-8") as f:
+#             f.write("STAFF STORE CODE MAPPING REPORT\n")
+#             f.write("=" * 50 + "\n")
+#             f.write(
+#                 f"Generated: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n")
+#             f.write(f"Total Staff Members: {len(staff_store_summary)}\n")
+#             f.write(f"Total Store Codes: {len(code_staff_map)}\n")
+#             f.write("=" * 50 + "\n\n")
+
+#             # Summary by staff
+#             f.write("SUMMARY BY STAFF MEMBER:\n")
+#             f.write("-" * 30 + "\n")
+#             for staff_name in sorted(staff_store_summary.keys()):
+#                 store_codes = sorted(staff_store_summary[staff_name])
+#                 f.write(f"Staff: {staff_name}\n")
+#                 f.write(f"  Store Codes: {len(store_codes)}\n")
+#                 f.write(f"  Codes: {', '.join(store_codes)}\n\n")
+
+#             # Detailed mapping
+#             f.write("DETAILED MAPPING:\n")
+#             f.write("-" * 30 + "\n")
+#             for store_code in sorted(code_staff_map.keys()):
+#                 staff_name = code_staff_map[store_code]
+#                 f.write(f"{store_code} -> {staff_name}\n")
+
+#         return report_file
+
+#     except Exception as e:
+#         logger.error("Failed to create staff report: %s", e)
+#         raise
 
 
 def collect_input_pdfs(input_files: Optional[Iterable[str]], input_folder: Optional[str]) -> List[Path]:
@@ -336,7 +426,8 @@ def merge_and_write(store_pages_map: Dict[str, List], store_order: List[str], ou
 
         annotate_quantities(tmp_merged, logger, on_tick=on_tick,
                             store_pages_map=store_pages_map,
-                            code_staff_map=code_staff_map)
+                            code_staff_map=code_staff_map,
+                            store_order=store_order)
     except Exception as e:
         if logger:
             logger.error(f"Failed to add quantities: {e}")
@@ -361,7 +452,8 @@ def merge_and_write(store_pages_map: Dict[str, List], store_order: List[str], ou
 def annotate_quantities(pdf_path: Path, logger: Optional[logging.Logger] = None,
                         on_tick: Optional[Callable[[], None]] = None,
                         store_pages_map: Optional[Dict[str, List]] = None,
-                        code_staff_map: Optional[Dict[str, str]] = None) -> None:
+                        code_staff_map: Optional[Dict[str, str]] = None,
+                        store_order: Optional[List[str]] = None) -> None:
     """Extract and annotate order quantities on each page.
 
     Args:
@@ -370,6 +462,7 @@ def annotate_quantities(pdf_path: Path, logger: Optional[logging.Logger] = None,
         on_tick: Callback function for progress updates
         store_pages_map: Mapping of store codes to page objects (from extract_store_pages)
         code_staff_map: Mapping of store codes to staff names
+        store_order: List of store codes in the desired order for logging
     """
     if logger is None:
         logger = logging.getLogger("po_merge_tool")
@@ -417,6 +510,7 @@ def annotate_quantities(pdf_path: Path, logger: Optional[logging.Logger] = None,
                 # Calculate and log quantities by staff if mapping is available
                 if store_pages_map and code_staff_map:
                     staff_totals: Dict[str, int] = {}
+                    staff_store_mapping: Dict[str, List[str]] = {}
 
                     # Calculate quantities per store code
                     # We need to track which pages belong to which store codes
@@ -435,29 +529,87 @@ def annotate_quantities(pdf_path: Path, logger: Optional[logging.Logger] = None,
                         if store_total > 0:
                             store_qty_map[store_code] = store_total
 
-                            # Add to staff total
+                            # Add to staff total and track store codes
                             staff_name = code_staff_map.get(
                                 store_code, "Unknown Staff")
                             if staff_name not in staff_totals:
                                 staff_totals[staff_name] = 0
+                                staff_store_mapping[staff_name] = []
                             staff_totals[staff_name] += store_total
+                            staff_store_mapping[staff_name].append(store_code)
 
-                    # Log staff totals
+                    # Enhanced logging: Staff details with store code mappings
                     if staff_totals:
+                        logger.info("=== CHI TIẾT STAFF VÀ STORE CODES ===")
+                        logger.info(
+                            "Đang xử lý dữ liệu cho %d staff members...", len(staff_totals))
+
+                        for staff_name in sorted(staff_totals.keys()):
+                            total_qty = staff_totals[staff_name]
+                            store_codes = sorted(
+                                staff_store_mapping[staff_name])
+                            store_count = len(store_codes)
+
+                            logger.info("Staff: %s", staff_name)
+                            logger.info("  - Tổng quantity: %d", total_qty)
+                            logger.info("  - Số store codes: %d", store_count)
+                            logger.info("  - Store codes: %s",
+                                        ", ".join(store_codes))
+                            logger.info(
+                                "  - Trung bình/Store: %.1f", total_qty / store_count if store_count > 0 else 0)
+                            logger.info("")
+
                         logger.info("=== TỔNG QUANTITY THEO STAFF ===")
                         for staff_name, total in sorted(staff_totals.items()):
                             logger.info("Staff %s: %d", staff_name, total)
                         logger.info("================================")
 
-                    # # Log store code totals for debugging
-                    # if store_qty_map:
-                    #     logger.info("=== TỔNG QUANTITY THEO MÃ CỬA HÀNG ===")
-                    #     for store_code, total in sorted(store_qty_map.items()):
-                    #         store_name = code_staff_map.get(
-                    #             store_code, "Unknown")
-                    #         logger.info("%s (%s): %d", store_code,
-                    #                     store_name, total)
-                    #     logger.info("=======================================")
+                        # Log summary statistics
+                        total_staff = len(staff_totals)
+                        total_stores = sum(len(codes)
+                                           for codes in staff_store_mapping.values())
+                        avg_stores_per_staff = total_stores / total_staff if total_staff > 0 else 0
+                        logger.info("=== THỐNG KÊ TỔNG QUAN ===")
+                        logger.info("Tổng số staff: %d", total_staff)
+                        logger.info("Tổng số store codes: %d", total_stores)
+                        logger.info(
+                            "Trung bình store codes/staff: %.1f", avg_stores_per_staff)
+                        logger.info("==========================")
+
+                    # Log store code totals for debugging
+                    if store_qty_map:
+                        logger.info("=== TỔNG QUANTITY THEO MÃ CỬA HÀNG ===")
+                        # Log in the order of the store code list, not alphabetically
+                        if store_order:
+                            for store_code in store_order:
+                                if store_code in store_qty_map:
+                                    total = store_qty_map[store_code]
+                                    staff_name = code_staff_map.get(
+                                        store_code, "Unknown")
+                                    logger.info("%s (Staff: %s): %d", store_code,
+                                                staff_name, total)
+
+                            # Log any extra codes that weren't in the original list
+                            extra_codes = [
+                                code for code in store_qty_map.keys() if code not in store_order]
+                            if extra_codes:
+                                logger.info(
+                                    "--- Extra codes found in PDFs ---")
+                                for store_code in sorted(extra_codes):
+                                    total = store_qty_map[store_code]
+                                    staff_name = code_staff_map.get(
+                                        store_code, "Unknown")
+                                    logger.info("%s (Staff: %s): %d", store_code,
+                                                staff_name, total)
+                        else:
+                            # Fallback to alphabetical order if no store_order provided
+                            for store_code, total in sorted(store_qty_map.items()):
+                                staff_name = code_staff_map.get(
+                                    store_code, "Unknown")
+                                logger.info("%s (Staff: %s): %d", store_code,
+                                            staff_name, total)
+
+                        logger.info("=======================================")
 
             except Exception:
                 # Avoid breaking flow due to logging calculation
@@ -465,11 +617,8 @@ def annotate_quantities(pdf_path: Path, logger: Optional[logging.Logger] = None,
 
         # Annotate PDF
         with fitz.open(str(pdf_path)) as doc:
-            # Require Roboto-ExtraBold font from local font folder (supports PyInstaller)
-            roboto_path = Path(resource_path("font/Roboto-ExtraBold.ttf"))
-            if not roboto_path.exists():
-                raise FileNotFoundError(
-                    f"Không tìm thấy font Roboto tại: {roboto_path}")
+            # Find Roboto font file using the enhanced finder
+            roboto_path = Path(find_font_file())
             roboto_font_name = "RobotoExtraBold"
 
             for i, (page, qty) in enumerate(zip(doc, qty_values)):
@@ -532,7 +681,7 @@ class POApp(tk.Tk):
         """Set application icon from available icon files using PyInstaller-compatible paths."""
         try:
             # Set icon .ico (Windows) - highest priority
-            ico_path = resource_path("icon/app.ico")
+            ico_path = resource_path("assets/icon/app.ico")
             if os.path.exists(ico_path):
                 print(f"Setting ICO icon from: {ico_path}")
                 self.iconbitmap(ico_path)
@@ -547,7 +696,7 @@ class POApp(tk.Tk):
                 return
 
             # Set icon PNG (cross-platform) - fallback
-            png_path = resource_path("icon/LPA-256.png")
+            png_path = resource_path("assets/icon/LPA-256.png")
             if os.path.exists(png_path):
                 try:
                     print(f"Setting PNG icon from: {png_path}")
@@ -558,7 +707,7 @@ class POApp(tk.Tk):
                     print(f"Could not load PNG icon: {e}")
 
             # If no icons found, continue without setting icon
-            print("No icon files found in icon/ folder")
+            print("No icon files found in assets/icon/ folder")
 
         except Exception as e:
             # Log error but don't crash the application
@@ -613,7 +762,10 @@ class POApp(tk.Tk):
             btn_frame, text="Bắt đầu", font=("Arial", 8, "bold"), command=self._on_start)
         self.start_btn.pack(side=tk.LEFT, padx=6)
         tk.Button(btn_frame, text="Mở thư mục PO", font=("Arial", 8, "bold"),
-                  command=self._open_output_dir).pack(side=tk.LEFT)
+                  command=self._open_output_dir).pack(side=tk.LEFT, padx=6)
+        self.view_staff_btn = tk.Button(btn_frame, text="Xem Staff Mapping", font=("Arial", 8, "bold"),
+                                        command=self._view_staff_mapping, state=tk.DISABLED)
+        self.view_staff_btn.pack(side=tk.LEFT, padx=6)
 
         # Progress
         self.progress = ttk.Progressbar(
@@ -681,6 +833,46 @@ class POApp(tk.Tk):
         except Exception:
             messagebox.showinfo("Info", f"Mở thư mục: {out.parent}")
 
+    def _view_staff_mapping(self):
+        """Display staff mapping information in a new window."""
+        if not hasattr(self, '_staff_mapping_data') or not self._staff_mapping_data:
+            messagebox.showinfo(
+                "Info", "Không có dữ liệu staff mapping để hiển thị.")
+            return
+
+        # Create a new window to display staff mapping
+        staff_window = tk.Toplevel(self)
+        staff_window.title("Staff - Store Code Mapping")
+        staff_window.geometry("600x500")
+
+        # Create text widget with scrollbar
+        text_frame = ttk.Frame(staff_window)
+        text_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+
+        text_widget = tk.Text(text_frame, wrap=tk.WORD)
+        scrollbar = ttk.Scrollbar(
+            text_frame, orient=tk.VERTICAL, command=text_widget.yview)
+        text_widget.configure(yscrollcommand=scrollbar.set)
+
+        text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
+        # Populate with staff mapping data
+        text_widget.insert(tk.END, "STAFF - STORE CODE MAPPING\n")
+        text_widget.insert(tk.END, "=" * 50 + "\n\n")
+
+        for staff_name, store_codes in self._staff_mapping_data.items():
+            text_widget.insert(tk.END, f"Staff: {staff_name}\n")
+            text_widget.insert(
+                tk.END, f"Store Codes ({len(store_codes)}): {', '.join(sorted(store_codes))}\n")
+            text_widget.insert(tk.END, "-" * 30 + "\n\n")
+
+        text_widget.config(state=tk.DISABLED)  # Make read-only
+
+        # Add close button
+        ttk.Button(staff_window, text="Đóng",
+                   command=staff_window.destroy).pack(pady=10)
+
     def _on_start(self):
         if self._worker_thread and self._worker_thread.is_alive():
             messagebox.showwarning(
@@ -702,6 +894,11 @@ class POApp(tk.Tk):
         self.start_btn.config(state=tk.DISABLED)
         self.progress['value'] = 0
         self.log_text.delete(1.0, tk.END)
+
+        # Clear previous staff mapping data and disable button
+        if hasattr(self, '_staff_mapping_data'):
+            delattr(self, '_staff_mapping_data')
+        self.view_staff_btn.config(state=tk.DISABLED)
 
         # prepare input files list
         inputs = [p.strip() for p in input_val.split(",") if p.strip()]
@@ -773,6 +970,32 @@ class POApp(tk.Tk):
                 if code_staff_map:
                     log.info("Đã load mapping staff cho %d mã cửa hàng",
                              len(code_staff_map))
+
+                    # Log detailed staff-store code mapping
+                    log.info("=== MAPPING STAFF - STORE CODES ===")
+                    staff_store_summary: Dict[str, List[str]] = {}
+                    for store_code, staff_name in code_staff_map.items():
+                        if staff_name not in staff_store_summary:
+                            staff_store_summary[staff_name] = []
+                        staff_store_summary[staff_name].append(store_code)
+
+                    for staff_name in sorted(staff_store_summary.keys()):
+                        store_codes = sorted(staff_store_summary[staff_name])
+                        log.info("Staff '%s' quản lý %d store codes: %s",
+                                 staff_name, len(store_codes), ", ".join(store_codes))
+                    log.info("==================================")
+
+                    # Store staff mapping data for GUI display
+                    self._staff_mapping_data = staff_store_summary
+
+                    # Create staff report file
+                    # try:
+                    #     output_path = Path(output_file)
+                    #     staff_report = create_staff_report(
+                    #         code_staff_map, output_path.parent, log)
+                    #     log.info("Báo cáo staff đã được tạo: %s", staff_report)
+                    # except Exception as e:
+                    #     log.warning("Không thể tạo báo cáo staff: %s", e)
             except Exception:
                 code_staff_map = None
 
@@ -783,6 +1006,11 @@ class POApp(tk.Tk):
                             code_staff_map=code_staff_map)
 
             log.info("Hoàn tất. Output: %s", output_file)
+
+            # Enable staff mapping button if data is available
+            if hasattr(self, '_staff_mapping_data') and self._staff_mapping_data:
+                self.view_staff_btn.config(state=tk.NORMAL)
+
             try:
                 messagebox.showinfo(
                     "Xong", f"Hoàn tất! Kết quả: {output_file}")
@@ -871,6 +1099,29 @@ def main():
         if code_staff_map:
             logger.info("Staff mapping loaded for %d store codes",
                         len(code_staff_map))
+
+            # Log detailed staff-store code mapping
+            logger.info("=== MAPPING STAFF - STORE CODES ===")
+            staff_store_summary: Dict[str, List[str]] = {}
+            for store_code, staff_name in code_staff_map.items():
+                if staff_name not in staff_store_summary:
+                    staff_store_summary[staff_name] = []
+                staff_store_summary[staff_name].append(store_code)
+
+            for staff_name in sorted(staff_store_summary.keys()):
+                store_codes = sorted(staff_store_summary[staff_name])
+                logger.info("Staff '%s' manages %d store codes: %s",
+                            staff_name, len(store_codes), ", ".join(store_codes))
+            logger.info("==================================")
+
+            # # Create staff report file
+            # try:
+            #     output_path = Path(args.output)
+            #     staff_report = create_staff_report(
+            #         code_staff_map, output_path.parent, logger)
+            #     logger.info("Staff report created: %s", staff_report)
+            # except Exception as e:
+            #     logger.warning("Could not create staff report: %s", e)
     except Exception:
         code_staff_map = None
 
