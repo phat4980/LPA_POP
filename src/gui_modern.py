@@ -1,30 +1,30 @@
 """
-PO Management Tool — High-Performance Modern UI (CustomTkinter + Optimized Treeview)
+PO Management Tool — Modern UI (CustomTkinter)
 
-Optimized for 60fps smooth scrolling, zero text-loss glitches, instant searching,
-and rock-solid performance with large datasets.
+Sidebar: merge, dashboard, staff lookup, settings.
+File cards, toast notices, hover tooltips — no extra UI libraries.
 """
 
 from __future__ import annotations
 
-import csv
 import datetime
 import logging
 import os
-import sys
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, List, Optional, Set, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
+
+import tkinter as tk
+from tkinter import filedialog, ttk
 
 try:
-    import tkinter as tk
-    from tkinter import filedialog, messagebox, ttk
     # pyrefly: ignore [missing-import]
     import customtkinter as ctk
-    CTK_AVAILABLE = True
-except Exception:
-    CTK_AVAILABLE = False
+except ImportError as e:
+    raise ImportError(
+        "Thiếu thư viện customtkinter. Trong venv hãy chạy: pip install customtkinter"
+    ) from e
 
 from config import (
     APP_NAME, APP_VERSION, DEFAULT_PATTERN,
@@ -40,6 +40,7 @@ from core import (
     merge_and_write,
     AnnotationResult,
 )
+from ui_widgets import Tooltip, ToastHost, PdfFileCardList
 
 
 # ===== Data Models for Dashboard =====
@@ -177,6 +178,7 @@ class ModernPOApp(ctk.CTk):
         self._current_view_name = "merge"
         self._search_debounce_timer: Optional[str] = None
         self._dash_search_debounce: Optional[str] = None
+        self.toast = ToastHost(self)
 
         # Build Theme & Styles
         self._setup_treeview_styles()
@@ -255,8 +257,6 @@ class ModernPOApp(ctk.CTk):
         fg_col = "#E0E0E0" if is_dark else "#212121"
 
         trees = []
-        if hasattr(self, "pdf_tree"):
-            trees.append(self.pdf_tree)
         if hasattr(self, "dash_tree"):
             trees.append(self.dash_tree)
         if hasattr(self, "staff_tree"):
@@ -313,13 +313,13 @@ class ModernPOApp(ctk.CTk):
         self.nav_btns: Dict[str, ctk.CTkButton] = {}
 
         nav_items = [
-            ("merge", "📑  Xử lý PO"),
-            ("dashboard", "📊  Thống kê & Báo cáo"),
-            ("staff", "👥  Tra cứu Staff"),
-            ("settings", "⚙️  Cài đặt"),
+            ("merge", "📑  Xử lý PO", "Chọn PDF, danh sách mã, rồi gộp thành 1 file PO"),
+            ("dashboard", "📊  Thống kê & Báo cáo", "KPI, mã thiếu/dư, qty theo staff sau khi merge"),
+            ("staff", "👥  Tra cứu Staff", "Tìm cửa hàng theo nhân viên từ file CSV"),
+            ("settings", "⚙️  Cài đặt", "Regex mã cửa hàng và tone màu giao diện"),
         ]
 
-        for i, (key, label) in enumerate(nav_items, start=2):
+        for i, (key, label, hint) in enumerate(nav_items, start=2):
             btn = ctk.CTkButton(
                 self.sidebar_frame,
                 text=label,
@@ -334,21 +334,7 @@ class ModernPOApp(ctk.CTk):
             )
             btn.grid(row=i, column=0, padx=12, pady=4, sticky="ew")
             self.nav_btns[key] = btn
-
-        # Theme Selector in Sidebar
-        self.theme_label = ctk.CTkLabel(
-            self.sidebar_frame, text="Giao diện:", font=ctk.CTkFont(size=11)
-        )
-        self.theme_label.grid(row=6, column=0, padx=20, pady=(10, 0), sticky="w")
-
-        self.theme_option = ctk.CTkOptionMenu(
-            self.sidebar_frame,
-            values=["Dark", "Light", "System"],
-            command=self._change_theme_mode,
-            height=30
-        )
-        self.theme_option.grid(row=7, column=0, padx=16, pady=(4, 16), sticky="ew")
-        self.theme_option.set(self.settings.theme_mode.capitalize())
+            Tooltip(btn, hint)
 
         # 2. Main Content Container
         self.content_container = ctk.CTkFrame(self, fg_color="transparent")
@@ -404,13 +390,9 @@ class ModernPOApp(ctk.CTk):
         view.grid_columnconfigure(0, weight=1)
         view.grid_rowconfigure(4, weight=1)  # Log panel expands
 
-        # 1. Step Progress Tracker
-        self.step_tracker = ModernStepTracker(view)
-        self.step_tracker.grid(row=0, column=0, sticky="ew", pady=(0, 10))
-
-        # 2. Section: PDF Files Selection Card (Treeview-based for 60fps)
+        # 1. PDF file cards
         pdf_card = ctk.CTkFrame(view)
-        pdf_card.grid(row=1, column=0, sticky="ew", pady=(0, 8))
+        pdf_card.grid(row=0, column=0, sticky="ew", pady=(0, 8))
         pdf_card.grid_columnconfigure(0, weight=1)
 
         pdf_header = ctk.CTkFrame(pdf_card, fg_color="transparent")
@@ -429,62 +411,38 @@ class ModernPOApp(ctk.CTk):
         )
         self.pdf_count_badge.pack(side="right")
 
-        # Treeview Table for Files
-        pdf_table_frame = tk.Frame(pdf_card, bg="#1E1E1E", height=110)
-        pdf_table_frame.grid(row=1, column=0, sticky="ew", padx=12, pady=4)
-        pdf_table_frame.grid_columnconfigure(0, weight=1)
-        pdf_table_frame.grid_rowconfigure(0, weight=1)
-        pdf_table_frame.pack_propagate(False)
+        self.pdf_list = PdfFileCardList(pdf_card, on_change=self._on_pdf_list_changed)
+        self.pdf_list.grid(row=1, column=0, sticky="ew", padx=12, pady=4)
 
-        cols = ("name", "size", "path")
-        self.pdf_tree = ttk.Treeview(
-            pdf_table_frame, columns=cols, show="headings",
-            style="Modern.Treeview", selectmode="extended", height=4
-        )
-        self.pdf_tree.heading("name", text="Tên File PDF")
-        self.pdf_tree.heading("size", text="Dung lượng")
-        self.pdf_tree.heading("path", text="Đường dẫn thư mục")
-
-        self.pdf_tree.column("name", width=260, minwidth=180)
-        self.pdf_tree.column("size", width=100, anchor="center")
-        self.pdf_tree.column("path", width=400, stretch=True)
-
-        self.pdf_tree.grid(row=0, column=0, sticky="nsew")
-
-        pdf_scroll = ttk.Scrollbar(pdf_table_frame, orient=tk.VERTICAL, command=self.pdf_tree.yview)
-        pdf_scroll.grid(row=0, column=1, sticky="ns")
-        self.pdf_tree.configure(yscrollcommand=pdf_scroll.set)
-
-        # Button bar for file operations
         btn_bar = ctk.CTkFrame(pdf_card, fg_color="transparent")
         btn_bar.grid(row=2, column=0, sticky="ew", padx=12, pady=(4, 8))
 
-        ctk.CTkButton(
+        add_files_btn = ctk.CTkButton(
             btn_bar, text="➕ Thêm File", width=100, height=30,
             command=self._choose_pdf_files
-        ).pack(side="left", padx=(0, 6))
+        )
+        add_files_btn.pack(side="left", padx=(0, 6))
+        Tooltip(add_files_btn, "Chọn một hoặc nhiều file PDF Purchase Order")
 
-        ctk.CTkButton(
+        add_folder_btn = ctk.CTkButton(
             btn_bar, text="📂 Thêm Thư Mục", width=120, height=30,
             fg_color=("gray70", "gray30"), hover_color=("gray60", "gray40"),
             command=self._choose_pdf_folder
-        ).pack(side="left", padx=(0, 6))
+        )
+        add_folder_btn.pack(side="left", padx=(0, 6))
+        Tooltip(add_folder_btn, "Thêm tất cả file .pdf trong một thư mục (không đệ quy)")
 
-        ctk.CTkButton(
-            btn_bar, text="🗑 Xóa Đã Chọn", width=110, height=30,
-            fg_color=("gray70", "gray30"), hover_color=("gray60", "gray40"),
-            command=self._remove_selected_pdfs
-        ).pack(side="left", padx=(0, 6))
-
-        ctk.CTkButton(
+        clear_btn = ctk.CTkButton(
             btn_bar, text="✖ Xóa Hết", width=90, height=30,
             fg_color="#D32F2F", hover_color="#B71C1C",
             command=self._clear_all_pdfs
-        ).pack(side="left")
+        )
+        clear_btn.pack(side="left")
+        Tooltip(clear_btn, "Xóa toàn bộ PDF đã chọn")
 
         # 3. Section: Store List & Output Paths
         meta_card = ctk.CTkFrame(view)
-        meta_card.grid(row=2, column=0, sticky="ew", pady=(0, 8))
+        meta_card.grid(row=1, column=0, sticky="ew", pady=(0, 8))
         meta_card.grid_columnconfigure(1, weight=1)
 
         # Store List Row
@@ -497,11 +455,15 @@ class ModernPOApp(ctk.CTk):
             meta_card, placeholder_text="Chọn file ListMCH.csv hoặc stores.txt..."
         )
         self.list_entry.grid(row=0, column=1, padx=(0, 8), pady=(10, 4), sticky="ew")
+        self.list_entry.bind("<KeyRelease>", lambda _e: self._refresh_ready_state())
+        Tooltip(self.list_entry, "CSV/TXT chứa mã cửa hàng (SG####). Cột tên và staff là tùy chọn.")
 
-        ctk.CTkButton(
+        list_btn = ctk.CTkButton(
             meta_card, text="Chọn...", width=80, height=30,
             command=self._choose_list_file
-        ).grid(row=0, column=2, padx=(0, 12), pady=(10, 4))
+        )
+        list_btn.grid(row=0, column=2, padx=(0, 12), pady=(10, 4))
+        Tooltip(list_btn, "Chọn file danh sách mã cửa hàng")
 
         # Output Path Row
         ctk.CTkLabel(
@@ -514,15 +476,19 @@ class ModernPOApp(ctk.CTk):
         self.out_entry = ctk.CTkEntry(meta_card)
         self.out_entry.insert(0, default_out)
         self.out_entry.grid(row=1, column=1, padx=(0, 8), pady=(4, 10), sticky="ew")
+        self.out_entry.bind("<KeyRelease>", lambda _e: self._refresh_ready_state())
+        Tooltip(self.out_entry, "Đường dẫn file PDF kết quả. Nên chọn Desktop hoặc thư mục dễ tìm.")
 
-        ctk.CTkButton(
+        out_btn = ctk.CTkButton(
             meta_card, text="Chọn...", width=80, height=30,
             command=self._choose_output_path
-        ).grid(row=1, column=2, padx=(0, 12), pady=(4, 10))
+        )
+        out_btn.grid(row=1, column=2, padx=(0, 12), pady=(4, 10))
+        Tooltip(out_btn, "Chọn nơi lưu file PO đã gộp")
 
         # 4. Action Bar (Start, Open Dir, View Report, Progress)
         action_card = ctk.CTkFrame(view, fg_color="transparent")
-        action_card.grid(row=3, column=0, sticky="ew", pady=(0, 8))
+        action_card.grid(row=2, column=0, sticky="ew", pady=(0, 8))
         action_card.grid_columnconfigure(0, weight=1)
 
         ctrl_row = ctk.CTkFrame(action_card, fg_color="transparent")
@@ -536,6 +502,7 @@ class ModernPOApp(ctk.CTk):
             command=self._on_start_processing
         )
         self.start_btn.pack(side="left", padx=(0, 8))
+        Tooltip(self.start_btn, "Cần đủ 3 thứ: PDF + danh sách mã + đường dẫn lưu, rồi bấm để gộp PO.")
 
         self.open_dir_btn = ctk.CTkButton(
             ctrl_row, text="📂 Mở Thư Mục Chứa",
@@ -544,6 +511,7 @@ class ModernPOApp(ctk.CTk):
             command=self._open_output_dir
         )
         self.open_dir_btn.pack(side="left", padx=(0, 8))
+        Tooltip(self.open_dir_btn, "Mở thư mục chứa file PDF kết quả")
 
         self.view_report_btn = ctk.CTkButton(
             ctrl_row, text="📊 Xem Báo Cáo Thống Kê",
@@ -551,12 +519,21 @@ class ModernPOApp(ctk.CTk):
             state="disabled", command=lambda: self._show_view("dashboard")
         )
         self.view_report_btn.pack(side="left")
+        Tooltip(self.view_report_btn, "Bật sau khi xử lý xong — xem mã thiếu/dư và qty theo staff")
+
+        self.ready_hint = ctk.CTkLabel(
+            ctrl_row, text="", font=ctk.CTkFont(size=12), text_color="gray55"
+        )
+        self.ready_hint.pack(side="right", padx=8)
 
         self.progress_bar = ctk.CTkProgressBar(action_card, height=10)
         self.progress_bar.pack(fill="x")
         self.progress_bar.set(0)
 
-        # 5. Colored Log Console
+        self.step_tracker = ModernStepTracker(view)
+        self.step_tracker.grid(row=3, column=0, sticky="ew", pady=(0, 6))
+
+        # Log console
         log_frame = ctk.CTkFrame(view)
         log_frame.grid(row=4, column=0, sticky="nsew")
         log_frame.grid_columnconfigure(0, weight=1)
@@ -630,6 +607,7 @@ class ModernPOApp(ctk.CTk):
             command=self._export_report_file
         )
         self.export_report_btn.pack(side="right")
+        Tooltip(self.export_report_btn, "Lưu báo cáo thiếu/dư mã và phân bổ staff ra file TXT")
 
         # 1. KPI Cards Row
         kpi_grid = ctk.CTkFrame(view, fg_color="transparent")
@@ -796,41 +774,56 @@ class ModernPOApp(ctk.CTk):
     # ===== VIEW 4: SETTINGS VIEW =====
 
     def _init_settings_view(self):
-        view = ctk.CTkScrollableFrame(self.content_container, fg_color="transparent")
+        # Regular frame (not CTkScrollableFrame) so tkraise() can show this tab.
+        view = ctk.CTkFrame(self.content_container, fg_color="transparent")
         view.grid_columnconfigure(0, weight=1)
+        view.grid_rowconfigure(0, weight=1)
 
         card = ctk.CTkFrame(view)
-        card.pack(fill="x", pady=(0, 12))
+        card.grid(row=0, column=0, sticky="nsew")
 
         ctk.CTkLabel(
             card, text="⚙️ Cài đặt Ứng Dụng",
             font=ctk.CTkFont(size=16, weight="bold")
         ).pack(anchor="w", padx=16, pady=(16, 12))
 
-        # 1. Regex Pattern
         p_row = ctk.CTkFrame(card, fg_color="transparent")
         p_row.pack(fill="x", padx=16, pady=6)
-        ctk.CTkLabel(p_row, text="Regex Pattern nhận diện mã:", width=200, anchor="w").pack(side="left")
+        ctk.CTkLabel(p_row, text="Regex Pattern nhận diện mã:", width=220, anchor="w").pack(side="left")
         self.pattern_entry = ctk.CTkEntry(p_row, width=250)
         self.pattern_entry.insert(0, self.settings.custom_pattern)
         self.pattern_entry.pack(side="left", padx=8)
+        Tooltip(self.pattern_entry, "Regex tìm mã cửa hàng trong PDF. Mặc định: SG + 4 chữ số.")
         ctk.CTkButton(
             p_row, text="Mặc định", width=80,
             command=lambda: (self.pattern_entry.delete(0, "end"), self.pattern_entry.insert(0, DEFAULT_PATTERN))
         ).pack(side="left")
 
-        # 2. Color Theme
+        mode_row = ctk.CTkFrame(card, fg_color="transparent")
+        mode_row.pack(fill="x", padx=16, pady=6)
+        ctk.CTkLabel(mode_row, text="Giao diện (sáng / tối):", width=220, anchor="w").pack(side="left")
+        self.theme_option = ctk.CTkOptionMenu(
+            mode_row,
+            values=["Dark", "Light", "System"],
+            command=self._change_theme_mode,
+            width=160,
+        )
+        self.theme_option.set(self.settings.theme_mode.capitalize())
+        self.theme_option.pack(side="left", padx=8)
+        Tooltip(self.theme_option, "Dark / Light / theo hệ thống. Đổi ngay lập tức.")
+
         t_row = ctk.CTkFrame(card, fg_color="transparent")
         t_row.pack(fill="x", padx=16, pady=6)
-        ctk.CTkLabel(t_row, text="Tone màu ứng dụng:", width=200, anchor="w").pack(side="left")
+        ctk.CTkLabel(t_row, text="Tone màu nút:", width=220, anchor="w").pack(side="left")
         self.color_theme_menu = ctk.CTkOptionMenu(
             t_row, values=["blue", "green", "dark-blue"],
-            command=self._change_color_theme
+            command=self._change_color_theme,
+            width=160,
         )
         self.color_theme_menu.set(self.settings.color_theme)
         self.color_theme_menu.pack(side="left", padx=8)
+        Tooltip(self.color_theme_menu, "Màu accent của nút. Cần mở lại app để áp dụng đầy đủ.")
 
-        # 3. Save Settings Button
         btn_row = ctk.CTkFrame(card, fg_color="transparent")
         btn_row.pack(fill="x", padx=16, pady=(16, 16))
         ctk.CTkButton(
@@ -849,30 +842,37 @@ class ModernPOApp(ctk.CTk):
         ctk.set_appearance_mode(mode.lower())
         self.settings.theme_mode = mode.lower()
         self.settings.save()
+        if hasattr(self, "pdf_list"):
+            self.pdf_list.refresh()
         self._setup_treeview_styles()
 
     def _change_color_theme(self, theme: str):
         self.settings.color_theme = theme
         self.settings.save()
-        messagebox.showinfo("Cài đặt", "Tone màu sẽ được áp dụng đầy đủ ở lần khởi động tới.")
+        self.toast.show("Tone màu sẽ áp dụng đầy đủ khi mở lại app.", "info")
 
     def _save_settings_btn(self):
         pat = self.pattern_entry.get().strip() or DEFAULT_PATTERN
         self.settings.custom_pattern = pat
+        self.settings.theme_mode = self.theme_option.get().lower()
+        self.settings.color_theme = self.color_theme_menu.get()
         self.settings.save()
         self.save_status_lbl.configure(text="✅ Đã lưu cấu hình!")
+        self.toast.show("Đã lưu cài đặt.", "success", 2200)
         self.after(2500, lambda: self.save_status_lbl.configure(text=""))
 
     def _restore_settings(self):
+        restored: List[Path] = []
         if self.settings.last_input_paths:
             for p in self.settings.last_input_paths:
                 path_obj = Path(p)
                 if path_obj.exists():
                     if path_obj.is_dir():
-                        self._input_files.extend(sorted(path_obj.glob("*.pdf")))
+                        restored.extend(sorted(path_obj.glob("*.pdf")))
                     elif path_obj.suffix.lower() == ".pdf":
-                        self._input_files.append(path_obj)
-            self._render_pdf_list()
+                        restored.append(path_obj)
+            if restored:
+                self.pdf_list.set_files(restored)
 
         if self.settings.last_list_file and os.path.exists(self.settings.last_list_file):
             self.list_entry.delete(0, "end")
@@ -884,63 +884,67 @@ class ModernPOApp(ctk.CTk):
             self.out_entry.delete(0, "end")
             self.out_entry.insert(0, os.path.join(self.settings.last_output_dir, f"PO_{today_str}.pdf"))
 
-    # ===== File Selection Methods (Fast Treeview) =====
+        self._refresh_ready_state()
+
+    # ===== File Selection Methods =====
+
+    def _on_pdf_list_changed(self):
+        self._input_files = self.pdf_list.files
+        self._refresh_ready_state()
 
     def _choose_pdf_files(self):
         files = filedialog.askopenfilenames(
             title="Chọn các file PDF PO", filetypes=[("PDF files", "*.pdf")]
         )
         if files:
-            existing = set(str(f) for f in self._input_files)
-            for f in files:
-                if str(f) not in existing:
-                    self._input_files.append(Path(f))
-            self._render_pdf_list()
+            self.pdf_list.add_files([Path(f) for f in files])
 
     def _choose_pdf_folder(self):
         folder = filedialog.askdirectory(title="Chọn thư mục chứa file PDF")
         if folder:
-            p = Path(folder)
-            found = sorted([x for x in p.glob("*.pdf")])
-            existing = set(str(f) for f in self._input_files)
-            for f in found:
-                if str(f) not in existing:
-                    self._input_files.append(f)
-            self._render_pdf_list()
+            found = sorted(Path(folder).glob("*.pdf"))
+            if not found:
+                self.toast.show("Thư mục không có file PDF.", "warning")
+                return
+            self.pdf_list.add_files(found)
 
     def _clear_all_pdfs(self):
-        self._input_files.clear()
-        self._render_pdf_list()
+        self.pdf_list.clear()
 
-    def _remove_selected_pdfs(self):
-        selected_items = self.pdf_tree.selection()
-        if not selected_items:
-            return
-        paths_to_remove = set()
-        for item in selected_items:
-            vals = self.pdf_tree.item(item, "values")
-            if vals and len(vals) >= 3:
-                full_p = os.path.join(vals[2], vals[0])
-                paths_to_remove.add(full_p)
+    def _refresh_ready_state(self):
+        """Live validation: border color + hint, no popups while filling the form."""
+        n_pdf = len(self._input_files)
+        self.pdf_count_badge.configure(text=f"{n_pdf} file PDF đã chọn")
 
-        self._input_files = [f for f in self._input_files if str(f) not in paths_to_remove]
-        self._render_pdf_list()
+        ok_pdf = n_pdf > 0
+        list_file = self.list_entry.get().strip()
+        ok_list = bool(list_file) and os.path.isfile(list_file)
+        out_file = self.out_entry.get().strip()
+        ok_out = bool(out_file)
 
-    def _render_pdf_list(self):
-        self.pdf_tree.delete(*self.pdf_tree.get_children())
-        count = len(self._input_files)
-        self.pdf_count_badge.configure(text=f"{count} file PDF đã chọn")
+        ok_color = ("#2E7D32", "#81C784")
+        bad_color = ("#C62828", "#EF9A9A")
+        try:
+            self.list_entry.configure(border_color=ok_color if ok_list else bad_color)
+            self.out_entry.configure(border_color=ok_color if ok_out else bad_color)
+        except Exception:
+            pass
 
-        for i, p in enumerate(self._input_files):
-            size_str = ""
-            try:
-                kb = p.stat().st_size / 1024
-                size_str = f"{kb/1024:.1f} MB" if kb > 1024 else f"{kb:.0f} KB"
-            except Exception:
-                pass
+        missing = []
+        if not ok_pdf:
+            missing.append("PDF")
+        if not ok_list:
+            missing.append("danh sách mã")
+        if not ok_out:
+            missing.append("nơi lưu")
 
-            tag = "row_even" if i % 2 == 0 else "row_odd"
-            self.pdf_tree.insert("", "end", values=(p.name, size_str, str(p.parent)), tags=(tag,))
+        if missing:
+            self.ready_hint.configure(
+                text="Còn thiếu: " + " · ".join(missing),
+                text_color="#E65100",
+            )
+        else:
+            self.ready_hint.configure(text="Sẵn sàng xử lý", text_color="#2E7D32")
 
     def _choose_list_file(self):
         f = filedialog.askopenfilename(
@@ -951,6 +955,7 @@ class ModernPOApp(ctk.CTk):
             self.list_entry.delete(0, "end")
             self.list_entry.insert(0, f)
             self._load_staff_directory(Path(f))
+            self._refresh_ready_state()
 
     def _choose_output_path(self):
         today_str = datetime.datetime.now().strftime("%d%m%Y")
@@ -963,6 +968,7 @@ class ModernPOApp(ctk.CTk):
         if f:
             self.out_entry.delete(0, "end")
             self.out_entry.insert(0, f)
+            self._refresh_ready_state()
 
     def _open_output_dir(self):
         out = self.out_entry.get().strip()
@@ -971,7 +977,7 @@ class ModernPOApp(ctk.CTk):
         p = Path(out)
         target = p.parent if p.suffix else p
         if not target.exists():
-            messagebox.showinfo("Thông báo", f"Thư mục chưa tồn tại:\n{target}")
+            self.toast.show(f"Thư mục chưa tồn tại:\n{target}", "warning")
             return
         try:
             import webbrowser
@@ -995,21 +1001,21 @@ class ModernPOApp(ctk.CTk):
 
     def _on_start_processing(self):
         if self._worker_thread and self._worker_thread.is_alive():
-            messagebox.showwarning("Đang chạy", "Quá trình merge đang diễn ra, vui lòng chờ.")
+            self.toast.show("Đang xử lý — vui lòng chờ xong rồi chạy lại.", "warning")
             return
 
         if not self._input_files:
-            messagebox.showerror("Lỗi", "Vui lòng chọn ít nhất một file PDF.")
+            self.toast.show("Chọn ít nhất một file PDF.", "error")
             return
 
         list_file = self.list_entry.get().strip()
         if not list_file or not os.path.exists(list_file):
-            messagebox.showerror("Lỗi", "Vui lòng chọn file danh sách mã cửa hàng hợp lệ.")
+            self.toast.show("Chọn file danh sách mã cửa hàng hợp lệ.", "error")
             return
 
         out_file = self.out_entry.get().strip()
         if not out_file:
-            messagebox.showerror("Lỗi", "Vui lòng chỉ định đường dẫn lưu file kết quả.")
+            self.toast.show("Chọn đường dẫn lưu file kết quả.", "error")
             return
 
         # Save paths to settings
@@ -1131,7 +1137,7 @@ class ModernPOApp(ctk.CTk):
         except Exception as e:
             log.exception("Lỗi trong quá trình xử lý: %s", e)
             self.step_tracker.set_error(2)
-            self.after(0, lambda: messagebox.showerror("Lỗi Xử Lý", f"Đã xảy ra lỗi:\n{e}"))
+            self.after(0, lambda err=str(e): self.toast.show(f"Lỗi xử lý:\n{err}", "error", 6000))
         finally:
             self.after(0, lambda: self.start_btn.configure(state="normal"))
 
@@ -1150,9 +1156,15 @@ class ModernPOApp(ctk.CTk):
             self.nav_btns["dashboard"].configure(text="📊  Thống kê & Báo cáo")
 
         self._render_dashboard()
-        messagebox.showinfo(
-            "Thành công",
-            f"Quá trình xử lý hoàn tất!\nTổng số lượng (Qty): {self.summary_data.total_qty}\nKết quả lưu tại:\n{self.out_entry.get()}"
+        qty = self.summary_data.total_qty if self.summary_data else 0
+        missing = len(self.summary_data.missing_codes) if self.summary_data else 0
+        extra = len(self.summary_data.extra_codes) if self.summary_data else 0
+        qty_txt = f"{qty:,}".replace(",", ".")
+        self.toast.show(
+            f"Hoàn tất — Qty {qty_txt}  ·  thiếu {missing}  ·  dư {extra}\n"
+            "Mở tab Thống kê để xem chi tiết.",
+            "success",
+            5000,
         )
 
     # ===== Dashboard Rendering (Ultra Fast) =====
@@ -1254,7 +1266,7 @@ class ModernPOApp(ctk.CTk):
 
     def _export_report_file(self):
         if not self.summary_data:
-            messagebox.showinfo("Thông báo", "Chưa có dữ liệu xử lý để xuất báo cáo.")
+            self.toast.show("Chưa có dữ liệu để xuất báo cáo. Hãy chạy merge trước.", "warning")
             return
 
         s = self.summary_data
@@ -1302,9 +1314,9 @@ class ModernPOApp(ctk.CTk):
                     out.write(f"\nStaff: {staff_name} (Tổng Qty: {staff_qty} | {len(codes)} cửa hàng):\n")
                     out.write(f"  Codes: {', '.join(codes)}\n")
 
-            messagebox.showinfo("Thành công", f"Đã xuất báo cáo thành công tại:\n{f}")
+            self.toast.show(f"Đã xuất báo cáo:\n{f}", "success")
         except Exception as e:
-            messagebox.showerror("Lỗi", f"Không thể ghi file báo cáo:\n{e}")
+            self.toast.show(f"Không ghi được file báo cáo:\n{e}", "error", 5000)
 
     # ===== Staff Directory Search (Ultra Fast) =====
 

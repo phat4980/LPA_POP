@@ -15,7 +15,7 @@ from typing import List, Optional
 
 # ===== Application Constants =====
 APP_NAME = "PO Management Tool"
-APP_VERSION = "2.0.0"
+APP_VERSION = "2.1.0"
 LOGFILE = "po_merge_tool.log"
 DEFAULT_PATTERN = r"\bSG\d{4}\b"
 

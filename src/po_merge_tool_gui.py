@@ -781,8 +781,10 @@ def main():
             launch_modern_gui()
             return
         except Exception as e:
-            # Fallback to Classic Tkinter GUI
-            logging.getLogger("po_merge_tool").warning("Falling back to classic Tkinter GUI: %s", e)
+            print(f"[GUI] Không mở được giao diện mới: {e}")
+            logging.getLogger("po_merge_tool").warning(
+                "Falling back to classic Tkinter GUI: %s", e
+            )
             app = POApp()
             app.mainloop()
             return
