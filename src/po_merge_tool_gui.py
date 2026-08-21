@@ -768,18 +768,15 @@ class POApp(tk.Tk):
 def main():
     parser = build_parser()
     args = parser.parse_args()
+    has_cli_inputs = any([args.input_folder, args.input_files, args.list_file])
 
-    if args.gui or (not any([args.input_folder, args.input_files, args.list_file]) and TK_AVAILABLE):
+    if args.gui:
         if not TK_AVAILABLE:
-            print(
-                "Tkinter không khả dụng trên hệ thống này. Hãy chạy không dùng --gui hoặc cài tkinter.")
+            print("Tkinter không khả dụng. Dùng --web hoặc CLI.")
             return
-        
-        # Try loading Modern CustomTkinter GUI first
         try:
             from gui_modern import launch_modern_gui
             launch_modern_gui()
-            return
         except Exception as e:
             print(f"[GUI] Không mở được giao diện mới: {e}")
             logging.getLogger("po_merge_tool").warning(
@@ -787,9 +784,13 @@ def main():
             )
             app = POApp()
             app.mainloop()
-            return
+        return
 
-    # CLI mode
+    if args.web or not has_cli_inputs:
+        from web_app import launch_web
+        launch_web(open_browser=not args.no_browser)
+        return
+
     run_cli(args)
 
 

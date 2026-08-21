@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LPA PO Merge</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body data-theme="dark">
+  <aside class="sidebar">
+    <div class="brand">
+      <h1>LPA PO Merge</h1>
+      <p id="app-ver">Web</p>
+    </div>
+    <nav>
+      <button class="nav-btn active" data-view="merge">Xử lý PO</button>
+      <button class="nav-btn" data-view="dashboard">Thống kê</button>
+      <button class="nav-btn" data-view="staff">Tra cứu Staff</button>
+      <button class="nav-btn" data-view="settings">Cài đặt</button>
+    </nav>
+    <p class="hint">Localhost only · API sẵn cho automation</p>
+  </aside>
+
+  <main>
+    <section id="view-merge" class="view active">
+      <div id="panel-upload" class="card">
+        <div class="section-head">
+          <h2>📁 1. Danh sách file PDF Purchase Order</h2>
+          <span class="muted" id="pdf-count">0 file PDF đã chọn</span>
+        </div>
+        <div id="dropzone" class="dropzone">Kéo thả PDF vào đây, hoặc bấm để chọn</div>
+        <input id="pdf-input" class="file-input" type="file" accept=".pdf,application/pdf" multiple />
+        <input id="pdf-folder-input" class="file-input" type="file" accept=".pdf,application/pdf" webkitdirectory directory multiple />
+        <div class="file-actions">
+          <button id="btn-add-pdfs" class="btn ghost" type="button">➕ Thêm file</button>
+          <button id="btn-add-folder" class="btn ghost" type="button">📂 Thêm thư mục</button>
+          <button id="btn-clear-pdfs" class="btn danger" type="button">✖ Xóa hết</button>
+        </div>
+        <ul id="pdf-list" class="file-list"></ul>
+      </div>
+
+      <div class="card">
+        <label>📋 2. File danh sách mã (CSV/TXT)
+          <div class="inline-field">
+            <input id="list-file-name" type="text" placeholder="Chưa chọn file CSV/TXT" readonly />
+            <button id="btn-choose-list" class="btn ghost" type="button">Chọn file...</button>
+          </div>
+          <input id="list-file" class="file-input" type="file" accept=".csv,.txt" />
+        </label>
+        <label>💾 3. Tên file PDF kết quả
+          <input id="output-path" type="text" placeholder="PO_DDMMYYYY.pdf" />
+          <span class="field-help">Sau khi hoàn tất, file sẽ được tải xuống từ trình duyệt.</span>
+        </label>
+      </div>
+
+      <div class="actions">
+        <button id="btn-start" class="primary" type="button">▶ BẮT ĐẦU XỬ LÝ</button>
+        <button id="btn-open-report" class="btn report hidden" type="button">📊 Xem báo cáo thống kê</button>
+        <a id="btn-download" class="btn ghost hidden" href="#" download>Tải PDF</a>
+        <span id="ready-hint" class="muted"></span>
+      </div>
+
+      <div class="steps" id="steps">
+        <span data-step="read">1. Đọc file</span>
+        <span data-step="extract">2. Trích xuất PO</span>
+        <span data-step="merge">3. Gộp PDF &amp; Ghi Qty</span>
+        <span data-step="done">4. Hoàn tất</span>
+      </div>
+      <div class="progress"><i id="bar"></i></div>
+      <div class="card log-card">
+        <div class="log-head">
+          <h2>Nhật ký</h2>
+          <button type="button" id="btn-clear-log" class="tiny">Xóa log</button>
+        </div>
+        <pre id="log"></pre>
+      </div>
+    </section>
+
+    <section id="view-dashboard" class="view">
+      <div class="dash-head">
+        <div class="dash-title"><h2>📊 Dashboard Báo cáo &amp; Thống kê</h2><button id="btn-export-report" class="btn ghost" type="button">📥 Xuất báo cáo</button></div>
+        <span id="dash-empty" class="muted">Chưa có job hoàn tất. Chạy merge trước.</span>
+      </div>
+      <div id="kpi" class="kpi hidden"></div>
+      <div id="staff-chips" class="staff-chips hidden"></div>
+      <div class="card">
+        <div class="table-tools">
+          <input id="dash-q" type="search" placeholder="Lọc mã, tên, staff…" />
+          <select id="dash-filter">
+            <option value="all">Tất cả</option>
+            <option value="missing">Thiếu mã</option>
+            <option value="extra">Dư mã</option>
+          </select>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Mã</th><th>Staff</th><th>Qty</th><th>Tên cửa hàng</th><th>Trạng thái</th></tr>
+            </thead>
+            <tbody id="dash-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-staff" class="view">
+      <div class="card">
+        <input id="staff-q" type="search" placeholder="Tìm staff, mã, địa chỉ…" />
+        <p class="muted" id="staff-count"></p>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Staff</th><th>Mã</th><th>Tên cửa hàng</th></tr></thead>
+            <tbody id="staff-body"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-settings" class="view">
+      <div class="card">
+        <h2>Cài đặt mặc định</h2>
+        <label>File danh sách mã mặc định
+          <input id="set-list" type="text" />
+        </label>
+        <label>Thư mục PDF mặc định
+          <input id="set-pdf-folder" type="text" />
+        </label>
+        <label>Thư mục lưu output
+          <input id="set-out-dir" type="text" />
+        </label>
+        <label>Regex mã cửa hàng
+          <input id="set-pattern" type="text" />
+        </label>
+        <label>Giao diện
+          <select id="set-theme"><option value="dark">Tối</option><option value="light">Sáng</option><option value="system">Theo hệ thống</option></select>
+        </label>
+        <button id="btn-save-settings" class="primary" type="button">Lưu cài đặt</button>
+        <p id="set-status" class="ok"></p>
+        <!-- <pre class="api-help">Automation (path mode):
+POST http://127.0.0.1:8080/api/jobs
+Content-Type: application/json
+
+{
+  "pdf_folder": "D:\\PO\\inbox",
+  "list_file": "D:\\PO\\MCH.csv",
+  "output": "D:\\PO\\out\\PO.pdf"
+}
+
+GET /api/jobs/{id}   ·   GET /api/jobs/{id}/pdf</pre> -->
+      </div>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>

@@ -1,6 +1,98 @@
-# PO Management Tool GUI
+# PO Management Tool
 
-Công cụ hợp nhất các file PO PDF theo danh sách mã cửa hàng, hỗ trợ giao diện đồ họa (GUI) và dòng lệnh (CLI).
+Công cụ hợp nhất các file PO PDF theo danh sách mã cửa hàng. Có **Web UI + REST API** (mặc định), GUI desktop, và CLI.
+
+---
+
+## 1. Yêu cầu hệ thống
+
+- Python 3.10 trở lên (khuyến nghị)
+- Windows
+- Thư viện: xem `requirements.txt` (PyPDF2, pdfplumber, PyMuPDF, FastAPI, CustomTkinter, …)
+
+---
+
+## 2. Cài đặt
+
+```sh
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+---
+
+## 3. Chạy
+
+### a. Web UI (mặc định) — Approach C
+
+```sh
+python src/po_merge_tool_gui.py
+python src/web_app.py
+```
+
+Mở `http://127.0.0.1:8080` (bind localhost). Có hai chế độ:
+
+- **Upload**: kéo thả PDF + CSV trên trình duyệt
+- **Đường dẫn máy**: trỏ folder/file trên disk — dùng cho automation
+
+Không mở browser:
+
+```sh
+python src/po_merge_tool_gui.py --web --no-browser
+```
+
+### b. Desktop GUI (CustomTkinter)
+
+```sh
+python src/po_merge_tool_gui.py --gui
+```
+
+### c. CLI
+
+```sh
+python src/po_merge_tool_gui.py --input-folder ./pdfs --list-file stores.csv --output PO_FINAL.pdf
+```
+
+---
+
+## 4. API (automation)
+
+Server chỉ lắng nghe `127.0.0.1:8080`.
+
+Tạo job bằng path trên máy (không upload):
+
+```sh
+curl -X POST http://127.0.0.1:8080/api/jobs -H "Content-Type: application/json" -d "{\"pdf_folder\":\"D:/PO/inbox\",\"list_file\":\"D:/PO/MCH.csv\",\"output\":\"D:/PO/out/PO.pdf\"}"
+```
+
+| Method | Path | Mô tả |
+|--------|------|--------|
+| POST | `/api/jobs` | Job path mode (JSON) |
+| POST | `/api/jobs/upload` | Job upload PDF + CSV |
+| GET | `/api/jobs/{id}` | Trạng thái + summary |
+| GET | `/api/jobs/{id}/events` | SSE progress |
+| GET | `/api/jobs/{id}/pdf` | Tải PDF kết quả |
+| GET/PUT | `/api/settings` | Default list / folder / output / regex |
+| GET | `/api/staff` | Tra cứu staff từ CSV |
+
+---
+
+## 5. Build EXE (desktop)
+
+```sh
+compile\build.bat
+```
+
+EXE hiện tại vẫn là GUI Tk. Web EXE (bundle uvicorn) làm bước sau.
+
+---
+
+## 6. Lưu ý
+
+- Log file: `po_merge_tool.log`. Settings: `%APPDATA%\LPA_POP\settings.json`.
+- CSV 1–3 cột: mã, tên cửa hàng, staff.
+- Merge xong: cảnh báo mã thiếu/dư, ghi qty (đã chia 2) lên từng trang.
 
 ---
 

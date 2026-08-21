@@ -114,5 +114,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--pattern", help="Regex pattern để tìm mã (mặc định: SG\\d{4})", default=DEFAULT_PATTERN)
     parser.add_argument("--gui", action="store_true",
-                        help="Mở giao diện đồ họa (GUI)")
+                        help="Mở giao diện desktop (CustomTkinter)")
+    parser.add_argument("--web", action="store_true",
+                        help="Mở giao diện web local (mặc định nếu không truyền input CLI)")
+    parser.add_argument("--no-browser", action="store_true",
+                        help="Khi --web: không tự mở trình duyệt")
     return parser

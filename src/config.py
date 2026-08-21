@@ -15,14 +15,17 @@ from typing import List, Optional
 
 # ===== Application Constants =====
 APP_NAME = "PO Management Tool"
-APP_VERSION = "2.1.0"
+APP_VERSION = "3.0.0"
 LOGFILE = "po_merge_tool.log"
 DEFAULT_PATTERN = r"\bSG\d{4}\b"
+WEB_HOST = "127.0.0.1"
+WEB_PORT = 8088
 
 # ===== Settings Persistence =====
 # Store settings next to the executable / script
 _SETTINGS_DIR = os.path.join(os.environ.get("APPDATA", "."), "LPA_POP")
 SETTINGS_FILE = os.path.join(_SETTINGS_DIR, "settings.json")
+JOBS_DIR = os.path.join(_SETTINGS_DIR, "jobs")
 
 
 def resource_path(rel_path: str) -> str:
@@ -42,6 +45,7 @@ class AppSettings:
     last_input_paths: List[str] = field(default_factory=list)
     last_list_file: str = ""
     last_output_dir: str = ""
+    default_pdf_folder: str = ""
     window_width: int = 1050
     window_height: int = 700
     theme_mode: str = "dark"  # "dark", "light", "system"
