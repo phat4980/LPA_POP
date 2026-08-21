@@ -40,9 +40,9 @@ if not exist "assets\icon\app.ico" (
 )
 echo Assets folder structure verified successfully.
 
-REM Build the executable with enhanced icon support
+REM Build the executable with enhanced icon and customtkinter support
 echo Building executable with enhanced icon support...
-pyinstaller --onefile --windowed --name "PO Management Tool" --icon "assets/icon/app.ico" src/po_merge_tool_gui.py --add-data "assets;assets" --clean
+pyinstaller --onefile --windowed --name "PO Management Tool" --icon "assets/icon/app.ico" src/po_merge_tool_gui.py --add-data "assets;assets" --collect-all customtkinter --clean
 
 if errorlevel 1 (
     echo Build failed!

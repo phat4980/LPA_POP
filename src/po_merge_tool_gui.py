@@ -1,35 +1,28 @@
 #!/usr/bin/env python3
 """
-PO Merge Tool - Modernized single-file script with optional Tkinter GUI
-- Clean code, type hints, better logging
-- Threaded GUI so it won't freeze
-- CLI mode retained for power users
+PO Merge Tool — GUI Module (Tkinter)
+
+Modernized single-file GUI with:
+- File listbox (add/remove individual files)
+- Colored log output (INFO=blue, WARNING=orange, ERROR=red)
+- Multi-step progress indicator
+- Real-time field validation
+- Remember last used paths
+- Improved layout and visual hierarchy
 
 Usage:
-  # GUI (recommended for non-IT):
   python po_merge_tool_gui.py --gui
-
-  # CLI example:
   python po_merge_tool_gui.py --input-folder ./pdfs --list-file stores.csv --output PO_FINAL.pdf
-
-Requirements (install with pip):
-  pip install PyPDF2 pdfplumber pillow
-
 """
 
 from __future__ import annotations
 
-import argparse
-import csv
 import datetime
 import logging
 import os
-import re
 import threading
-from dataclasses import dataclass
 from pathlib import Path
-import sys
-from typing import Callable, Dict, Iterable, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional
 
 try:
     import tkinter as tk
@@ -38,800 +31,533 @@ try:
 except Exception:
     TK_AVAILABLE = False
 
-import pdfplumber
-from PyPDF2 import PdfReader, PdfWriter
-import fitz  # Add this with other imports
+from config import (
+    APP_NAME, APP_VERSION, DEFAULT_PATTERN,
+    resource_path, AppSettings,
+)
+from core import (
+    setup_logging,
+    collect_input_pdfs,
+    read_store_list,
+    read_code_name_map,
+    read_code_staff_map,
+    extract_store_pages,
+    merge_and_write,
+)
+from cli import build_parser, run_cli
+
+
+# ===== GUI Log Handler =====
 
-LOGFILE = "po_merge_tool.log"
-DEFAULT_PATTERN = r"\bSG\d{4}\b"
-
-
-def resource_path(rel_path: str) -> str:
-    """Get absolute path to resource, works for dev and for PyInstaller"""
-    try:
-        # PyInstaller creates a temp folder and stores path in _MEIPASS
-        base_path = sys._MEIPASS
-    except Exception:
-        base_path = os.path.abspath(".")
-
-    return os.path.join(base_path, rel_path)
-
-
-def find_font_file() -> str:
-    """Find Roboto font file in various possible locations."""
-    # Try multiple possible paths for the font
-    possible_paths = [
-        "assets/font/Roboto-ExtraBold.ttf",
-        "font/Roboto-ExtraBold.ttf",  # Fallback for old builds
-        "Roboto-ExtraBold.ttf"        # Direct fallback
-    ]
-
-    # Log the search process for debugging
-    # logger = logging.getLogger("po_merge_tool")
-    # logger.info("Tìm kiếm font Roboto-ExtraBold.ttf...")
-
-    for path in possible_paths:
-        full_path = resource_path(path)
-        # logger.debug(f"Thử đường dẫn: {full_path}")
-        if os.path.exists(full_path):
-            # logger.info(f"Tìm thấy font tại: {full_path}")
-            return full_path
-        else:
-            logger.debug(f"Không tìm thấy tại: {full_path}")
-
-    # If none found, raise error with helpful message
-    error_msg = (
-        f"Không tìm thấy font Roboto-ExtraBold.ttf. "
-        f"Đã thử các đường dẫn: {', '.join(possible_paths)}. "
-        f"Vui lòng đảm bảo file font tồn tại trong thư mục assets/font/"
-    )
-    logger.error(error_msg)
-    raise FileNotFoundError(error_msg)
-
-
-def setup_logging(logfile: str = LOGFILE) -> logging.Logger:
-    logger = logging.getLogger("po_merge_tool")
-    logger.setLevel(logging.INFO)
-    if not logger.handlers:
-        fmt = logging.Formatter("%(asctime)s %(levelname)s: %(message)s")
-        fh = logging.FileHandler(logfile, encoding="utf-8")
-        fh.setFormatter(fmt)
-        ch = logging.StreamHandler()
-        ch.setFormatter(fmt)
-        logger.addHandler(fh)
-        logger.addHandler(ch)
-    return logger
-
-
-logger = setup_logging()
-
-
-def read_store_list(path: Path) -> List[str]:
-    """Read CSV or plain text list of PO/store codes. Returns uppercase trimmed codes in order."""
-    if not path.exists():
-        raise FileNotFoundError(path)
-    codes: List[str] = []
-    if path.suffix.lower() == ".csv":
-        with path.open(newline="", encoding="utf-8") as f:
-            rdr = csv.reader(f)
-            for row in rdr:
-                if not row:
-                    continue
-                code = str(row[0]).strip()
-                if code:
-                    codes.append(code.upper())
-    else:
-        with path.open(encoding="utf-8") as f:
-            for line in f:
-                code = line.strip()
-                if code:
-                    codes.append(code.upper())
-    return codes
-
-
-def read_code_name_map(path: Path) -> Dict[str, str]:
-    """Read CSV with two columns: store code, store name.
-
-    Returns a mapping code -> name. Codes are normalized to uppercase and trimmed.
-    If the file does not exist, raises FileNotFoundError.
-    """
-    if not path.exists():
-        raise FileNotFoundError(path)
-    mapping: Dict[str, str] = {}
-    with path.open(newline="", encoding="utf-8") as f:
-        rdr = csv.reader(f)
-        for row in rdr:
-            if not row:
-                continue
-            code = str(row[0]).strip().upper() if len(row) >= 1 else ""
-            name = str(row[1]).strip() if len(row) >= 2 else ""
-            if code:
-                mapping[code] = name
-    return mapping
-
-
-def read_code_staff_map(path: Path) -> Dict[str, str]:
-    """Read CSV with store code and staff columns.
-
-    Expected format: store_code, store_name, staff_name
-    Returns a mapping code -> staff. Codes are normalized to uppercase and trimmed.
-    If the file does not exist, raises FileNotFoundError.
-    """
-    if not path.exists():
-        raise FileNotFoundError(path)
-    mapping: Dict[str, str] = {}
-    with path.open(newline="", encoding="utf-8") as f:
-        rdr = csv.reader(f)
-        for row in rdr:
-            if not row or len(row) < 3:
-                continue
-            code = str(row[0]).strip().upper()
-            staff = str(row[2]).strip()
-            if code and staff:
-                mapping[code] = staff
-    return mapping
-
-
-# def create_staff_report(code_staff_map: Dict[str, str], output_dir: Path, logger: Optional[logging.Logger] = None) -> Path:
-#     """Create a comprehensive staff report showing store code mappings.
-
-#     Args:
-#         code_staff_map: Mapping of store codes to staff names
-#         output_dir: Directory to save the report
-#         logger: Logger instance for logging
-
-#     Returns:
-#         Path to the created report file
-#     """
-#     if logger is None:
-#         logger = logging.getLogger("po_merge_tool")
-
-#     # Group by staff
-#     staff_store_summary: Dict[str, List[str]] = {}
-#     for store_code, staff_name in code_staff_map.items():
-#         if staff_name not in staff_store_summary:
-#             staff_store_summary[staff_name] = []
-#         staff_store_summary[staff_name].append(store_code)
-
-#     # Create report filename with timestamp
-#     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-#     report_file = output_dir / f"staff_store_mapping_report_{timestamp}.txt"
-
-#     try:
-#         with report_file.open("w", encoding="utf-8") as f:
-#             f.write("STAFF STORE CODE MAPPING REPORT\n")
-#             f.write("=" * 50 + "\n")
-#             f.write(
-#                 f"Generated: {datetime.datetime.now().strftime('%d/%m/%Y %H:%M:%S')}\n")
-#             f.write(f"Total Staff Members: {len(staff_store_summary)}\n")
-#             f.write(f"Total Store Codes: {len(code_staff_map)}\n")
-#             f.write("=" * 50 + "\n\n")
-
-#             # Summary by staff
-#             f.write("SUMMARY BY STAFF MEMBER:\n")
-#             f.write("-" * 30 + "\n")
-#             for staff_name in sorted(staff_store_summary.keys()):
-#                 store_codes = sorted(staff_store_summary[staff_name])
-#                 f.write(f"Staff: {staff_name}\n")
-#                 f.write(f"  Store Codes: {len(store_codes)}\n")
-#                 f.write(f"  Codes: {', '.join(store_codes)}\n\n")
-
-#             # Detailed mapping
-#             f.write("DETAILED MAPPING:\n")
-#             f.write("-" * 30 + "\n")
-#             for store_code in sorted(code_staff_map.keys()):
-#                 staff_name = code_staff_map[store_code]
-#                 f.write(f"{store_code} -> {staff_name}\n")
-
-#         return report_file
-
-#     except Exception as e:
-#         logger.error("Failed to create staff report: %s", e)
-#         raise
-
-
-def collect_input_pdfs(input_files: Optional[Iterable[str]], input_folder: Optional[str]) -> List[Path]:
-    files: List[Path] = []
-    if input_folder:
-        p = Path(input_folder)
-        if p.exists() and p.is_dir():
-            files += sorted([x for x in p.glob("*.pdf")])
-    if input_files:
-        for f in input_files:
-            p = Path(f)
-            if p.exists():
-                if p.is_dir():
-                    files += sorted([x for x in p.glob("*.pdf")])
-                elif p.suffix.lower() == ".pdf":
-                    files.append(p)
-    # dedupe while preserving order
-    seen = set()
-    res: List[Path] = []
-    for f in files:
-        fs = str(f)
-        if fs not in seen:
-            seen.add(fs)
-            res.append(f)
-    return res
-
-
-@dataclass
-class ExtractResult:
-    # map store_code -> list of PdfReader.PageObject
-    store_pages: Dict[str, List]
-    total_pages: int
-    initial_buffer_pages: int
-
-
-def extract_store_pages(pdf_files: List[Path], pattern: str, progress_cb: Optional[Callable[[int, int], None]] = None,
-                        logger: Optional[logging.Logger] = None) -> ExtractResult:
-    """Scan PDFs, extract pages per detected store code.
-
-    Returns ExtractResult containing mapping and page counts.
-    """
-    if logger is None:
-        logger = logging.getLogger("po_merge_tool")
-    pat = re.compile(pattern, re.IGNORECASE)
-    store_pages: Dict[str, List] = {}
-    current_store: Optional[str] = None
-
-    buffer_pages: List = []
-    total_pages = 0
-    # first pass: count pages for progress
-    readers: List[Tuple[Path, int]] = []
-    for pdf_file in pdf_files:
-        try:
-            r = PdfReader(str(pdf_file))
-            readers.append((pdf_file, len(r.pages)))
-            total_pages += len(r.pages)
-        except Exception as e:
-            logger.error("Failed reading %s: %s", pdf_file, e)
-    processed = 0
-    for pdf_file, page_count in readers:
-        try:
-            reader = PdfReader(str(pdf_file))
-            with pdfplumber.open(str(pdf_file)) as plumber_pdf:
-                for i in range(len(reader.pages)):
-                    page_obj = reader.pages[i]
-                    try:
-                        text = plumber_pdf.pages[i].extract_text() or ""
-                    except Exception:
-                        # extraction may fail for some pages -> fallback to empty string
-                        text = ""
-                    m = pat.search(text)
-                    if m:
-                        code = m.group(0).upper()
-                        if current_store is None and buffer_pages:
-                            # assign buffer to this first discovered code
-                            store_pages.setdefault(
-                                code, []).extend(buffer_pages)
-                            buffer_pages = []
-                        current_store = code
-                        store_pages.setdefault(
-                            current_store, []).append(page_obj)
-                    else:
-                        if current_store is None:
-                            buffer_pages.append(page_obj)
-                        else:
-                            store_pages.setdefault(
-                                current_store, []).append(page_obj)
-                    processed += 1
-                    if progress_cb:
-                        progress_cb(processed, total_pages)
-        except Exception as e:
-            logger.exception("Error processing %s: %s", pdf_file, e)
-
-    if buffer_pages:
-        logger.warning(
-            "There are %d pages before the first detected code.", len(buffer_pages))
-        if store_pages:
-            first_code = next(iter(store_pages))
-            logger.info(
-                "Appending those initial pages to first detected code: %s", first_code)
-            store_pages[first_code] = buffer_pages + store_pages[first_code]
-        else:
-            logger.error("No PO code found at all in input PDFs.")
-
-    return ExtractResult(store_pages=store_pages, total_pages=total_pages, initial_buffer_pages=len(buffer_pages))
-
-
-def merge_and_write(store_pages_map: Dict[str, List], store_order: List[str], output_file: Path,
-                    logger: Optional[logging.Logger] = None, progress_cb: Optional[Callable[[int, int], None]] = None,
-                    code_to_name: Optional[Dict[str, str]] = None, code_staff_map: Optional[Dict[str, str]] = None) -> None:
-    """Merge pages following store_order, then annotate quantities, then export final file.
-
-    The merged content is first written to a temporary PDF. Quantities are annotated
-    onto that temporary file. Only after successful annotation will the result be
-    moved to the requested output path. If annotation fails, no final output file
-    is produced.
-
-    Args:
-        store_pages_map: Mapping of store codes to page objects
-        store_order: List of store codes in desired order
-        output_file: Path for the final output PDF
-        logger: Logger instance for logging
-        progress_cb: Callback function for progress updates
-        code_to_name: Optional mapping of store codes to store names
-        code_staff_map: Optional mapping of store codes to staff names for staff-based quantity totals
-    """
-    writer = PdfWriter()
-    expected = [s.upper() for s in store_order]
-    found = list(store_pages_map.keys())
-
-    # Determine extras and count total pages to be merged
-    extras = [c for c in found if c not in expected]
-    expected_pages_count = sum(
-        len(store_pages_map[c]) for c in expected if c in store_pages_map)
-    extras_pages_count = sum(len(store_pages_map[c]) for c in extras)
-    merged_pages_total = expected_pages_count + extras_pages_count
-
-    # Progress steps: per-code merge ticks + 1 (write temp) + per-page annotate ticks (2x pages) + 1 (finalize)
-    annotate_ticks = merged_pages_total * 2
-    total_steps = len(expected) + len(extras) + 1 + annotate_ticks + 1
-    current_step = 0
-
-    # Merge in expected order
-    for code in expected:
-        if code in store_pages_map:
-            for p in store_pages_map[code]:
-                writer.add_page(p)
-        else:
-            if logger:
-                store_name = (code_to_name or {}).get(code)
-                if store_name:
-                    logger.warning(
-                        "Không có mã cửa hàng: %s - %s", code, store_name)
-                else:
-                    logger.warning("Không có mã cửa hàng: %s", code)
-        current_step += 1
-        if progress_cb:
-            progress_cb(current_step, total_steps)
-
-    # Append extras at the end
-    if extras and logger:
-        logger.info("Appending %d extra detected codes at end: %s", len(
-            extras), ", ".join(extras[:10]) + ("..." if len(extras) > 10 else ""))
-    for code in extras:
-        for p in store_pages_map[code]:
-            writer.add_page(p)
-        current_step += 1
-        if progress_cb:
-            progress_cb(current_step, total_steps)
-
-    # Ensure output directory exists
-    output_file.parent.mkdir(parents=True, exist_ok=True)
-
-    # Write merged PDF to a temporary file first
-    tmp_merged = output_file.parent / \
-        f"{output_file.stem}__merged_tmp{output_file.suffix}"
-    with tmp_merged.open("wb") as f:
-        writer.write(f)
-    if logger:
-        logger.info("Đã hợp nhất vào file tạm: %s", tmp_merged)
-
-    current_step += 1
-    if progress_cb:
-        progress_cb(current_step, total_steps)
-
-    # Annotate quantities on the temporary merged PDF (with per-page progress)
-    try:
-        if logger:
-            logger.info("Thêm các chú thích số lượng...")
-
-        def on_tick():
-            nonlocal current_step
-            current_step += 1
-            if progress_cb:
-                progress_cb(current_step, total_steps)
-
-        annotate_quantities(tmp_merged, logger, on_tick=on_tick,
-                            store_pages_map=store_pages_map,
-                            code_staff_map=code_staff_map,
-                            store_order=store_order)
-    except Exception as e:
-        if logger:
-            logger.error(f"Failed to add quantities: {e}")
-        # Do not export final file if annotation fails
-        raise
-
-    current_step += 1
-    if progress_cb:
-        progress_cb(current_step, total_steps)
-
-    # Move annotated temp file to final output path
-    tmp_merged.replace(output_file)
-    if logger:
-        logger.info("Xuất file PDF cuối cùng: %s", output_file)
-
-    current_step += 1
-    if progress_cb:
-        progress_cb(current_step, total_steps)
-
-
-# Thêm function này sau các functions hiện có và trước class POApp
-def annotate_quantities(pdf_path: Path, logger: Optional[logging.Logger] = None,
-                        on_tick: Optional[Callable[[], None]] = None,
-                        store_pages_map: Optional[Dict[str, List]] = None,
-                        code_staff_map: Optional[Dict[str, str]] = None,
-                        store_order: Optional[List[str]] = None) -> None:
-    """Extract and annotate order quantities on each page.
-
-    Args:
-        pdf_path: Path to the PDF file to annotate
-        logger: Logger instance for logging
-        on_tick: Callback function for progress updates
-        store_pages_map: Mapping of store codes to page objects (from extract_store_pages)
-        code_staff_map: Mapping of store codes to staff names
-        store_order: List of store codes in the desired order for logging
-    """
-    if logger is None:
-        logger = logging.getLogger("po_merge_tool")
-
-    def get_qty_from_table(page) -> Optional[int]:
-        try:
-            table = page.extract_table()
-            if table:
-                for row in table:
-                    if not row or "order" in str(row).lower():
-                        continue
-                    try:
-                        qty = int(row[7])  # column 8 (index 7)
-                        return qty // 2
-                    except (ValueError, IndexError, TypeError):
-                        continue
-        except Exception as e:
-            logger.debug(f"Failed extracting table from page: {e}")
-        return None
-
-    try:
-        tmp_path = pdf_path.with_stem(pdf_path.stem + "_tmp")
-        with pdfplumber.open(str(pdf_path)) as pdf:
-            total_pages = len(pdf.pages)
-            qty_values = []
-
-            # Extract quantities
-            for i, page in enumerate(pdf.pages):
-                qty = get_qty_from_table(page)
-                qty_values.append(qty)
-                if on_tick:
-                    try:
-                        on_tick()
-                    except Exception:
-                        pass
-
-            # Log total quantity after division by 2 (ignoring pages without quantity)
-            try:
-                total_qty_after_div2 = sum(
-                    q for q in qty_values if q is not None)
-                date_str = datetime.datetime.now().strftime("%d/%m/%Y")
-                logger.info("Tổng số lượng ngày %s: %d",
-                            date_str, total_qty_after_div2)
-
-                # Calculate and log quantities by staff if mapping is available
-                if store_pages_map and code_staff_map:
-                    staff_totals: Dict[str, int] = {}
-                    staff_store_mapping: Dict[str, List[str]] = {}
-
-                    # Calculate quantities per store code
-                    # We need to track which pages belong to which store codes
-                    # Since pages are merged in order, we can calculate this
-                    current_page = 0
-                    store_qty_map: Dict[str, int] = {}
-
-                    for store_code, pages in store_pages_map.items():
-                        store_total = 0
-                        # Calculate total quantity for this store code
-                        for i in range(len(pages)):
-                            if current_page < len(qty_values) and qty_values[current_page] is not None:
-                                store_total += qty_values[current_page]
-                            current_page += 1
-
-                        if store_total > 0:
-                            store_qty_map[store_code] = store_total
-
-                            # Add to staff total and track store codes
-                            staff_name = code_staff_map.get(
-                                store_code, "Unknown Staff")
-                            if staff_name not in staff_totals:
-                                staff_totals[staff_name] = 0
-                                staff_store_mapping[staff_name] = []
-                            staff_totals[staff_name] += store_total
-                            staff_store_mapping[staff_name].append(store_code)
-
-                    # Enhanced logging: Staff details with store code mappings
-                    if staff_totals:
-                        logger.info("=== CHI TIẾT STAFF VÀ STORE CODES ===")
-                        logger.info(
-                            "Đang xử lý dữ liệu cho %d staff members...", len(staff_totals))
-
-                        for staff_name in sorted(staff_totals.keys()):
-                            total_qty = staff_totals[staff_name]
-                            store_codes = sorted(
-                                staff_store_mapping[staff_name])
-                            store_count = len(store_codes)
-
-                            logger.info("Staff: %s", staff_name)
-                            logger.info("  - Tổng quantity: %d", total_qty)
-                            logger.info("  - Số store codes: %d", store_count)
-                            logger.info("  - Store codes: %s",
-                                        ", ".join(store_codes))
-                            logger.info(
-                                "  - Trung bình/Store: %.1f", total_qty / store_count if store_count > 0 else 0)
-                            logger.info("")
-
-                        logger.info("=== TỔNG QUANTITY THEO STAFF ===")
-                        for staff_name, total in sorted(staff_totals.items()):
-                            logger.info("Staff %s: %d", staff_name, total)
-                        logger.info("================================")
-
-                        # Log summary statistics
-                        total_staff = len(staff_totals)
-                        total_stores = sum(len(codes)
-                                           for codes in staff_store_mapping.values())
-                        avg_stores_per_staff = total_stores / total_staff if total_staff > 0 else 0
-                        logger.info("=== THỐNG KÊ TỔNG QUAN ===")
-                        logger.info("Tổng số staff: %d", total_staff)
-                        logger.info("Tổng số store codes: %d", total_stores)
-                        logger.info(
-                            "Trung bình store codes/staff: %.1f", avg_stores_per_staff)
-                        logger.info("==========================")
-
-                    # Log store code totals for debugging
-                    if store_qty_map:
-                        logger.info("=== TỔNG QUANTITY THEO MÃ CỬA HÀNG ===")
-                        # Log in the order of the store code list, not alphabetically
-                        if store_order:
-                            for store_code in store_order:
-                                if store_code in store_qty_map:
-                                    total = store_qty_map[store_code]
-                                    staff_name = code_staff_map.get(
-                                        store_code, "Unknown")
-                                    logger.info("%s (Staff: %s): %d", store_code,
-                                                staff_name, total)
-
-                            # Log any extra codes that weren't in the original list
-                            extra_codes = [
-                                code for code in store_qty_map.keys() if code not in store_order]
-                            if extra_codes:
-                                logger.info(
-                                    "--- Extra codes found in PDFs ---")
-                                for store_code in sorted(extra_codes):
-                                    total = store_qty_map[store_code]
-                                    staff_name = code_staff_map.get(
-                                        store_code, "Unknown")
-                                    logger.info("%s (Staff: %s): %d", store_code,
-                                                staff_name, total)
-                        else:
-                            # Fallback to alphabetical order if no store_order provided
-                            for store_code, total in sorted(store_qty_map.items()):
-                                staff_name = code_staff_map.get(
-                                    store_code, "Unknown")
-                                logger.info("%s (Staff: %s): %d", store_code,
-                                            staff_name, total)
-
-                        logger.info("=======================================")
-
-            except Exception:
-                # Avoid breaking flow due to logging calculation
-                pass
-
-        # Annotate PDF
-        with fitz.open(str(pdf_path)) as doc:
-            # Find Roboto font file using the enhanced finder
-            roboto_path = Path(find_font_file())
-            roboto_font_name = "RobotoExtraBold"
-
-            for i, (page, qty) in enumerate(zip(doc, qty_values)):
-                if qty is not None:
-                    text = str(qty)
-                    x, y = page.rect.width - 40, page.rect.height - 1
-                    # Ensure custom font is available on this page
-                    page.insert_font(fontname=roboto_font_name,
-                                     fontfile=str(roboto_path))
-                    page.insert_text((x, y), text, fontsize=20,
-                                     color=(1, 0, 0), fontname=roboto_font_name)
-                if on_tick:
-                    try:
-                        on_tick()
-                    except Exception:
-                        pass
-            doc.save(str(tmp_path))
-
-        # Replace original with annotated version
-        tmp_path.replace(pdf_path)
-        logger.info("Đã thêm chú thích số lượng vào trong file PO")
-
-    except Exception as e:
-        logger.error(f"Failed to process quantities: {e}")
-        raise
-
-
-# -----------------------
-# Minimal Tkinter GUI for non-IT users
-# -----------------------
 
 class TkLoggerHandler(logging.Handler):
-    """Logging handler that posts messages to a callback (used by GUI)."""
+    """Logging handler that posts color-tagged messages to a Tk Text widget."""
 
-    def __init__(self, callback: Callable[[str], None]):
+    def __init__(self, callback: Callable[[str, str], None]):
         super().__init__()
         self.callback = callback
 
     def emit(self, record: logging.LogRecord) -> None:
         msg = self.format(record)
+        level = record.levelname  # INFO, WARNING, ERROR, DEBUG
         try:
-            self.callback(msg + "\n")
+            self.callback(msg + "\n", level)
         except Exception:
             pass
+
+
+# ===== Step Progress Tracker =====
+
+
+class StepTracker:
+    """Visual multi-step progress indicator using tk.Labels."""
+
+    STEPS = [
+        ("1. Đọc file", "read"),
+        ("2. Trích xuất", "extract"),
+        ("3. Gộp PDF", "merge"),
+        ("4. Hoàn tất", "done"),
+    ]
+
+    # States: pending, active, complete
+    COLORS = {
+        "pending":  {"bg": "#E0E0E0", "fg": "#9E9E9E"},
+        "active":   {"bg": "#2196F3", "fg": "#FFFFFF"},
+        "complete": {"bg": "#4CAF50", "fg": "#FFFFFF"},
+        "error":    {"bg": "#F44336", "fg": "#FFFFFF"},
+    }
+
+    def __init__(self, parent: tk.Frame):
+        self.frame = tk.Frame(parent, bg="#F5F5F5")
+        self.frame.pack(fill=tk.X, pady=(6, 2))
+        self.labels: List[tk.Label] = []
+        self.arrows: List[tk.Label] = []
+
+        for i, (text, _) in enumerate(self.STEPS):
+            if i > 0:
+                arrow = tk.Label(self.frame, text="→", font=("Arial", 12, "bold"),
+                                 bg="#F5F5F5", fg="#BDBDBD")
+                arrow.pack(side=tk.LEFT, padx=2)
+                self.arrows.append(arrow)
+
+            lbl = tk.Label(self.frame, text=f"  {text}  ", font=("Arial", 9, "bold"),
+                           relief=tk.FLAT, padx=8, pady=4)
+            lbl.pack(side=tk.LEFT, padx=2)
+            self.labels.append(lbl)
+
+        self.reset()
+
+    def reset(self):
+        for lbl in self.labels:
+            c = self.COLORS["pending"]
+            lbl.config(bg=c["bg"], fg=c["fg"])
+
+    def set_step(self, step_key: str, state: str = "active"):
+        """Set a step's visual state. step_key is one of: read, extract, merge, done."""
+        for i, (_, key) in enumerate(self.STEPS):
+            if key == step_key:
+                c = self.COLORS.get(state, self.COLORS["pending"])
+                self.labels[i].config(bg=c["bg"], fg=c["fg"])
+                break
+
+    def complete_step(self, step_key: str):
+        self.set_step(step_key, "complete")
+
+    def activate_step(self, step_key: str):
+        self.set_step(step_key, "active")
+
+    def error_step(self, step_key: str):
+        self.set_step(step_key, "error")
+
+
+# ===== Main Application =====
 
 
 class POApp(tk.Tk):
     def __init__(self):
         super().__init__()
-        self.title("PO Management Tool")
-        self.geometry("900x600")
+        self.title(f"{APP_NAME} v{APP_VERSION}")
+
+        # Load saved settings
+        self.settings = AppSettings.load()
+        self.geometry(f"{self.settings.window_width}x{self.settings.window_height}")
+        self.minsize(800, 550)
 
         # Set application icon
         self._set_icon()
 
+        # Track validation state
+        self._valid_inputs = False
+        self._valid_list = False
+
         self._build_ui()
+        self._restore_settings()
         self._worker_thread: Optional[threading.Thread] = None
 
-    def _set_icon(self):
-        """Set application icon from available icon files using PyInstaller-compatible paths."""
+        # Save window size on close
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
+
+    def _on_close(self):
+        """Save settings and close."""
         try:
-            # Set icon .ico (Windows) - highest priority
+            self.settings.window_width = self.winfo_width()
+            self.settings.window_height = self.winfo_height()
+            self.settings.save()
+        except Exception:
+            pass
+        self.destroy()
+
+    def _set_icon(self):
+        """Set application icon from available icon files."""
+        try:
             ico_path = resource_path("assets/icon/app.ico")
             if os.path.exists(ico_path):
-                print(f"Setting ICO icon from: {ico_path}")
                 self.iconbitmap(ico_path)
-                # Also try to set taskbar icon explicitly
                 try:
                     import ctypes
-                    myappid = 'lpa.pop.merge.tool.1.0'  # arbitrary string
-                    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
-                        myappid)
-                except Exception as e:
-                    print(f"Could not set taskbar icon ID: {e}")
+                    myappid = 'lpa.pop.merge.tool.2.0'
+                    ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+                except Exception:
+                    pass
                 return
 
-            # Set icon PNG (cross-platform) - fallback
             png_path = resource_path("assets/icon/LPA-256.png")
             if os.path.exists(png_path):
                 try:
-                    print(f"Setting PNG icon from: {png_path}")
                     icon_img = tk.PhotoImage(file=png_path)
                     self.iconphoto(False, icon_img)
                     return
-                except Exception as e:
-                    print(f"Could not load PNG icon: {e}")
+                except Exception:
+                    pass
 
-            # If no icons found, continue without setting icon
             print("No icon files found in assets/icon/ folder")
-
         except Exception as e:
-            # Log error but don't crash the application
             print(f"Could not set application icon: {e}")
 
     def _build_ui(self):
-        frm = ttk.Frame(self, padding=10)
-        frm.pack(fill=tk.BOTH, expand=True)
+        # Main container
+        main_frame = tk.Frame(self, bg="#FAFAFA")
+        main_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Row 1 - inputs
-        inp_frame = tk.LabelFrame(
-            frm, text="Chọn các file PO", font=("Arial", 12, "bold"))
-        inp_frame.pack(fill=tk.X, pady=4)
-        self.input_paths_var = tk.StringVar(value="")
-        inp_row = ttk.Frame(inp_frame)
-        inp_row.pack(fill=tk.X, padx=6, pady=6)
-        self.input_entry = ttk.Entry(
-            inp_row, textvariable=self.input_paths_var)
-        self.input_entry.pack(side=tk.LEFT, fill=tk.X, expand=True)
-        ttk.Button(inp_row, text="Chọn file/folder",
-                   command=self._choose_input).pack(side=tk.LEFT, padx=6)
+        # ===== HEADER =====
+        header = tk.Frame(main_frame, bg="#1565C0", height=56)
+        header.pack(fill=tk.X)
+        header.pack_propagate(False)
+        tk.Label(header, text=f"📋 {APP_NAME}", font=("Arial", 16, "bold"),
+                 bg="#1565C0", fg="white").pack(side=tk.LEFT, padx=16, pady=10)
+        tk.Label(header, text=f"v{APP_VERSION}", font=("Arial", 10),
+                 bg="#1565C0", fg="#BBDEFB").pack(side=tk.LEFT, pady=10)
 
-        # Row 2 - list file
-        list_frame = ttk.Frame(frm)
-        list_frame.pack(fill=tk.X, pady=4)
-        tk.Label(list_frame, text="Danh sách mã cửa hàng (CSV/TXT):",
-                 font=("Arial", 12, "bold")).pack(side=tk.LEFT)
+        # Content area with padding
+        content = ttk.Frame(main_frame, padding=12)
+        content.pack(fill=tk.BOTH, expand=True)
+
+        # ===== SECTION 1: Input PDF Files =====
+        inp_frame = tk.LabelFrame(content, text=" 📁 Chọn các file PO ",
+                                  font=("Arial", 11, "bold"), padx=8, pady=6)
+        inp_frame.pack(fill=tk.X, pady=(0, 6))
+
+        # File listbox with scrollbar
+        list_container = tk.Frame(inp_frame)
+        list_container.pack(fill=tk.X, pady=(0, 4))
+
+        self.file_listbox = tk.Listbox(list_container, height=4,
+                                       font=("Consolas", 9),
+                                       selectmode=tk.EXTENDED,
+                                       bg="#FAFAFA", relief=tk.GROOVE, bd=1)
+        self.file_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+
+        lb_scroll = ttk.Scrollbar(list_container, orient=tk.VERTICAL,
+                                  command=self.file_listbox.yview)
+        lb_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.file_listbox['yscrollcommand'] = lb_scroll.set
+
+        # Buttons row for file management
+        btn_row = tk.Frame(inp_frame)
+        btn_row.pack(fill=tk.X)
+
+        self.add_file_btn = tk.Button(btn_row, text="➕ Thêm file",
+                                      font=("Arial", 9), command=self._add_files,
+                                      relief=tk.GROOVE, padx=8, cursor="hand2")
+        self.add_file_btn.pack(side=tk.LEFT, padx=(0, 4))
+
+        self.add_folder_btn = tk.Button(btn_row, text="📂 Thêm folder",
+                                        font=("Arial", 9), command=self._add_folder,
+                                        relief=tk.GROOVE, padx=8, cursor="hand2")
+        self.add_folder_btn.pack(side=tk.LEFT, padx=(0, 4))
+
+        self.remove_btn = tk.Button(btn_row, text="🗑 Xóa đã chọn",
+                                    font=("Arial", 9), command=self._remove_selected,
+                                    relief=tk.GROOVE, padx=8, fg="#D32F2F", cursor="hand2")
+        self.remove_btn.pack(side=tk.LEFT, padx=(0, 4))
+
+        self.clear_btn = tk.Button(btn_row, text="✖ Xóa tất cả",
+                                   font=("Arial", 9), command=self._clear_files,
+                                   relief=tk.GROOVE, padx=8, fg="#D32F2F", cursor="hand2")
+        self.clear_btn.pack(side=tk.LEFT)
+
+        # Validation indicator for input files
+        self.input_status = tk.Label(btn_row, text="", font=("Arial", 9))
+        self.input_status.pack(side=tk.RIGHT, padx=4)
+
+        # ===== SECTION 2: Store List File =====
+        list_frame = tk.LabelFrame(content, text=" 📋 Danh sách mã cửa hàng (CSV/TXT) ",
+                                   font=("Arial", 11, "bold"), padx=8, pady=6)
+        list_frame.pack(fill=tk.X, pady=(0, 6))
+
+        list_row = tk.Frame(list_frame)
+        list_row.pack(fill=tk.X)
+
         self.list_var = tk.StringVar()
-        self.list_entry = ttk.Entry(list_frame, textvariable=self.list_var)
-        self.list_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=6)
-        ttk.Button(list_frame, text="Chọn...",
-                   command=self._choose_list).pack(side=tk.LEFT)
+        self.list_var.trace_add("write", lambda *_: self._validate_list_file())
+        self.list_entry = ttk.Entry(list_row, textvariable=self.list_var,
+                                    font=("Consolas", 9))
+        self.list_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
 
-        # Row 3 - output
-        out_frame = ttk.Frame(frm)
-        out_frame.pack(fill=tk.X, pady=4)
-        tk.Label(out_frame, text="Chỗ lưu PO:", font=(
-            "Arial", 12, "bold")).pack(side=tk.LEFT)
-        # Tạo tên file theo ngày hiện tại, format PO_DDMMYYYY.pdf
+        tk.Button(list_row, text="Chọn...", font=("Arial", 9),
+                  command=self._choose_list, relief=tk.GROOVE,
+                  padx=8, cursor="hand2").pack(side=tk.LEFT)
+
+        self.list_status = tk.Label(list_row, text="", font=("Arial", 9))
+        self.list_status.pack(side=tk.RIGHT, padx=4)
+
+        # ===== SECTION 3: Output =====
+        out_frame = tk.LabelFrame(content, text=" 💾 Chỗ lưu PO ",
+                                  font=("Arial", 11, "bold"), padx=8, pady=6)
+        out_frame.pack(fill=tk.X, pady=(0, 6))
+
+        out_row = tk.Frame(out_frame)
+        out_row.pack(fill=tk.X)
+
         today_str = datetime.datetime.now().strftime("%d%m%Y")
-        default_output_name = f"PO_{today_str}.pdf"
-        self.output_var = tk.StringVar(value=default_output_name)
-        self.output_entry = ttk.Entry(out_frame, textvariable=self.output_var)
-        self.output_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=6)
-        ttk.Button(out_frame, text="Chọn...",
-                   command=self._choose_output).pack(side=tk.LEFT)
+        default_output = os.path.join(
+            os.path.expanduser("~"), "Desktop", f"PO_{today_str}.pdf"
+        )
+        self.output_var = tk.StringVar(value=default_output)
+        self.output_entry = ttk.Entry(out_row, textvariable=self.output_var,
+                                      font=("Consolas", 9))
+        self.output_entry.pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 4))
 
-        # Buttons
-        btn_frame = ttk.Frame(frm)
-        btn_frame.pack(fill=tk.X, pady=6)
+        tk.Button(out_row, text="Chọn...", font=("Arial", 9),
+                  command=self._choose_output, relief=tk.GROOVE,
+                  padx=8, cursor="hand2").pack(side=tk.LEFT)
+
+        # ===== ACTION BUTTONS =====
+        btn_frame = tk.Frame(content, bg="#FAFAFA")
+        btn_frame.pack(fill=tk.X, pady=(4, 6))
+
         self.start_btn = tk.Button(
-            btn_frame, text="Bắt đầu", font=("Arial", 8, "bold"), command=self._on_start)
-        self.start_btn.pack(side=tk.LEFT, padx=6)
-        tk.Button(btn_frame, text="Mở thư mục PO", font=("Arial", 8, "bold"),
-                  command=self._open_output_dir).pack(side=tk.LEFT, padx=6)
-        self.view_staff_btn = tk.Button(btn_frame, text="Xem Staff Mapping", font=("Arial", 8, "bold"),
-                                        command=self._view_staff_mapping, state=tk.DISABLED)
-        self.view_staff_btn.pack(side=tk.LEFT, padx=6)
+            btn_frame, text="▶  Bắt đầu", font=("Arial", 12, "bold"),
+            bg="#2E7D32", fg="white", activebackground="#1B5E20",
+            activeforeground="white", command=self._on_start,
+            relief=tk.RAISED, padx=20, pady=6, cursor="hand2",
+            state=tk.DISABLED  # Disabled until validation passes
+        )
+        self.start_btn.pack(side=tk.LEFT, padx=(0, 8))
 
-        # Progress
+        tk.Button(btn_frame, text="📂 Mở thư mục PO", font=("Arial", 9),
+                  command=self._open_output_dir, relief=tk.GROOVE,
+                  padx=8, cursor="hand2").pack(side=tk.LEFT, padx=(0, 4))
+
+        self.view_staff_btn = tk.Button(
+            btn_frame, text="👥 Xem Staff Mapping", font=("Arial", 9),
+            command=self._view_staff_mapping, state=tk.DISABLED,
+            relief=tk.GROOVE, padx=8, cursor="hand2"
+        )
+        self.view_staff_btn.pack(side=tk.LEFT)
+
+        # ===== STEP PROGRESS INDICATOR =====
+        self.step_tracker = StepTracker(content)
+
+        # Progress bar
         self.progress = ttk.Progressbar(
-            frm, orient=tk.HORIZONTAL, mode="determinate")
-        self.progress.pack(fill=tk.X, pady=6)
+            content, orient=tk.HORIZONTAL, mode="determinate")
+        self.progress.pack(fill=tk.X, pady=(2, 6))
 
-        # Log view
-        log_frame = ttk.LabelFrame(frm, text="Log")
-        log_frame.pack(fill=tk.BOTH, expand=True, pady=6)
-        self.log_text = tk.Text(log_frame, height=12, wrap=tk.NONE)
+        # ===== LOG VIEW =====
+        log_frame = tk.LabelFrame(content, text=" 📝 Log ",
+                                  font=("Arial", 11, "bold"))
+        log_frame.pack(fill=tk.BOTH, expand=True)
+
+        log_container = tk.Frame(log_frame)
+        log_container.pack(fill=tk.BOTH, expand=True, padx=4, pady=4)
+
+        self.log_text = tk.Text(log_container, height=10, wrap=tk.NONE,
+                                font=("Consolas", 9), bg="#263238", fg="#B0BEC5",
+                                insertbackground="white", relief=tk.FLAT)
         self.log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scroll = ttk.Scrollbar(
-            log_frame, orient=tk.VERTICAL, command=self.log_text.yview)
-        scroll.pack(side=tk.RIGHT, fill=tk.Y)
-        self.log_text['yscrollcommand'] = scroll.set
 
-        # attach a GUI log handler
+        # Vertical scrollbar
+        v_scroll = ttk.Scrollbar(log_container, orient=tk.VERTICAL,
+                                 command=self.log_text.yview)
+        v_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        self.log_text['yscrollcommand'] = v_scroll.set
+
+        # Horizontal scrollbar
+        h_scroll = ttk.Scrollbar(log_frame, orient=tk.HORIZONTAL,
+                                 command=self.log_text.xview)
+        h_scroll.pack(fill=tk.X, padx=4, pady=(0, 4))
+        self.log_text['xscrollcommand'] = h_scroll.set
+
+        # Configure color tags for log levels
+        self.log_text.tag_config("INFO", foreground="#64B5F6")      # Light blue
+        self.log_text.tag_config("WARNING", foreground="#FFB74D")   # Orange
+        self.log_text.tag_config("ERROR", foreground="#EF5350")     # Red
+        self.log_text.tag_config("DEBUG", foreground="#78909C")     # Gray
+        self.log_text.tag_config("SUCCESS", foreground="#81C784")   # Green
+
+        # Attach GUI log handler
         self.gui_log_handler = TkLoggerHandler(self._append_log)
         self.gui_log_handler.setFormatter(logging.Formatter(
             "%(asctime)s %(levelname)s: %(message)s"))
         logging.getLogger("po_merge_tool").addHandler(self.gui_log_handler)
 
-    def _append_log(self, text: str):
-        self.log_text.insert(tk.END, text)
-        self.log_text.see(tk.END)
+    # ===== Settings Persistence =====
 
-    def _choose_input(self):
+    def _restore_settings(self):
+        """Restore last used paths from settings."""
+        if self.settings.last_input_paths:
+            for p in self.settings.last_input_paths:
+                if os.path.exists(p):
+                    display = self._format_file_entry(p)
+                    self.file_listbox.insert(tk.END, display)
+            self._validate_inputs()
+
+        if self.settings.last_list_file and os.path.exists(self.settings.last_list_file):
+            self.list_var.set(self.settings.last_list_file)
+
+        if self.settings.last_output_dir and os.path.isdir(self.settings.last_output_dir):
+            today_str = datetime.datetime.now().strftime("%d%m%Y")
+            self.output_var.set(
+                os.path.join(self.settings.last_output_dir, f"PO_{today_str}.pdf")
+            )
+
+    def _save_current_settings(self):
+        """Save current paths to settings."""
+        self.settings.last_input_paths = self._get_all_paths()
+        self.settings.last_list_file = self.list_var.get().strip()
+        out_path = self.output_var.get().strip()
+        if out_path:
+            self.settings.last_output_dir = str(Path(out_path).parent)
+        self.settings.save()
+
+    # ===== File Management =====
+
+    def _format_file_entry(self, filepath: str) -> str:
+        """Format a file path for display in the listbox."""
+        p = Path(filepath)
+        if p.is_file():
+            size_kb = p.stat().st_size / 1024
+            if size_kb > 1024:
+                size_str = f"{size_kb / 1024:.1f} MB"
+            else:
+                size_str = f"{size_kb:.0f} KB"
+            return f"{p.name}  ({size_str})  [{p.parent}]"
+        elif p.is_dir():
+            pdf_count = len(list(p.glob("*.pdf")))
+            return f"📂 {p.name}  ({pdf_count} PDFs)  [{p.parent}]"
+        return str(filepath)
+
+    def _get_all_paths(self) -> List[str]:
+        """Extract original file paths from listbox display entries."""
+        paths = []
+        for i in range(self.file_listbox.size()):
+            entry = self.file_listbox.get(i)
+            # Extract path from format: "name  (size)  [parent_dir]"
+            if "[" in entry and "]" in entry:
+                parent = entry[entry.rfind("[") + 1:entry.rfind("]")]
+                name = entry.split("  (")[0].strip()
+                # Remove folder icon if present
+                if name.startswith("📂 "):
+                    name = name[2:].strip()
+                full_path = os.path.join(parent, name)
+                paths.append(full_path)
+            else:
+                paths.append(entry)
+        return paths
+
+    def _add_files(self):
+        """Open file dialog to add PDF files."""
         files = filedialog.askopenfilenames(
-            title="Chọn file PDF (có thể chọn nhiều)", filetypes=[("PDF files", "*.pdf")])
+            title="Chọn file PDF (có thể chọn nhiều)",
+            filetypes=[("PDF files", "*.pdf")])
         if files:
-            # allow mixing files and folder by letting user input comma-separated values
-            self.input_paths_var.set(",".join(files))
-        else:
-            folder = filedialog.askdirectory(title="Hoặc chọn folder chứa PDF")
-            if folder:
-                self.input_paths_var.set(folder)
+            existing = set(self._get_all_paths())
+            for f in files:
+                if f not in existing:
+                    display = self._format_file_entry(f)
+                    self.file_listbox.insert(tk.END, display)
+            self._validate_inputs()
+
+    def _add_folder(self):
+        """Open folder dialog to add all PDFs from a folder."""
+        folder = filedialog.askdirectory(title="Chọn folder chứa PDF")
+        if folder:
+            existing = set(self._get_all_paths())
+            if folder not in existing:
+                display = self._format_file_entry(folder)
+                self.file_listbox.insert(tk.END, display)
+            self._validate_inputs()
+
+    def _remove_selected(self):
+        """Remove selected items from the file listbox."""
+        selected = list(self.file_listbox.curselection())
+        for i in reversed(selected):
+            self.file_listbox.delete(i)
+        self._validate_inputs()
+
+    def _clear_files(self):
+        """Clear all items from the file listbox."""
+        self.file_listbox.delete(0, tk.END)
+        self._validate_inputs()
 
     def _choose_list(self):
-        f = filedialog.askopenfilename(title="Chọn ListMCH.csv hoặc .txt", filetypes=[
-                                       ("CSV/TXT", "*.csv *.txt")])
+        f = filedialog.askopenfilename(
+            title="Chọn file danh sách mã cửa hàng",
+            filetypes=[("CSV/TXT", "*.csv *.txt")])
         if f:
             self.list_var.set(f)
 
     def _choose_output(self):
         today_str = datetime.datetime.now().strftime("%d%m%Y")
-        default_output_name = f"PO_{today_str}.pdf"
+        default_name = f"PO_{today_str}.pdf"
         f = filedialog.asksaveasfilename(
             title="Chọn nơi lưu file output",
             defaultextension=".pdf",
             filetypes=[("PDF", "*.pdf")],
-            initialfile=default_output_name  # Luôn cập nhật tên theo ngày hiện tại
-        )
+            initialfile=default_name)
         if f:
             self.output_var.set(f)
 
     def _open_output_dir(self):
         out = Path(self.output_var.get())
-        if not out.exists():
-            messagebox.showinfo(
-                "Info", "File output chưa tồn tại: %s" % str(out))
+        target_dir = out.parent if out.suffix else out
+        if not target_dir.exists():
+            messagebox.showinfo("Info", f"Thư mục chưa tồn tại: {target_dir}")
             return
         try:
             import webbrowser
-            webbrowser.open(out.parent.as_uri())
+            webbrowser.open(target_dir.as_uri())
         except Exception:
-            messagebox.showinfo("Info", f"Mở thư mục: {out.parent}")
+            messagebox.showinfo("Info", f"Mở thư mục: {target_dir}")
+
+    # ===== Validation =====
+
+    def _validate_inputs(self):
+        """Validate input file list and update UI indicator."""
+        paths = self._get_all_paths()
+        count = self.file_listbox.size()
+        if count > 0:
+            self._valid_inputs = True
+            self.input_status.config(text=f"✅ {count} mục đã chọn", fg="#2E7D32")
+        else:
+            self._valid_inputs = False
+            self.input_status.config(text="⚠ Chưa chọn file", fg="#E65100")
+        self._update_start_button()
+
+    def _validate_list_file(self):
+        """Validate the store list file and update UI indicator."""
+        path = self.list_var.get().strip()
+        if path and Path(path).exists():
+            try:
+                from core import read_store_list
+                codes = read_store_list(Path(path))
+                self._valid_list = True
+                self.list_status.config(
+                    text=f"✅ {len(codes)} mã cửa hàng", fg="#2E7D32")
+            except Exception as e:
+                self._valid_list = False
+                self.list_status.config(text=f"❌ Lỗi đọc file", fg="#D32F2F")
+        elif path:
+            self._valid_list = False
+            self.list_status.config(text="❌ File không tồn tại", fg="#D32F2F")
+        else:
+            self._valid_list = False
+            self.list_status.config(text="⚠ Chưa chọn file", fg="#E65100")
+        self._update_start_button()
+
+    def _update_start_button(self):
+        """Enable/disable start button based on validation state."""
+        if self._valid_inputs and self._valid_list:
+            self.start_btn.config(state=tk.NORMAL)
+        else:
+            self.start_btn.config(state=tk.DISABLED)
+
+    # ===== Log Output =====
+
+    def _append_log(self, text: str, level: str = "INFO"):
+        """Append colored log message to the text widget."""
+        # Determine tag based on level
+        tag = level if level in ("INFO", "WARNING", "ERROR", "DEBUG") else "INFO"
+
+        # Special: mark completion messages as SUCCESS
+        if "Hoàn tất" in text or "Done" in text:
+            tag = "SUCCESS"
+
+        self.log_text.insert(tk.END, text, tag)
+        self.log_text.see(tk.END)
+
+    # ===== Staff Mapping View =====
 
     def _view_staff_mapping(self):
         """Display staff mapping information in a new window."""
@@ -840,16 +566,15 @@ class POApp(tk.Tk):
                 "Info", "Không có dữ liệu staff mapping để hiển thị.")
             return
 
-        # Create a new window to display staff mapping
         staff_window = tk.Toplevel(self)
         staff_window.title("Staff - Store Code Mapping")
         staff_window.geometry("600x500")
 
-        # Create text widget with scrollbar
         text_frame = ttk.Frame(staff_window)
         text_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        text_widget = tk.Text(text_frame, wrap=tk.WORD)
+        text_widget = tk.Text(text_frame, wrap=tk.WORD, font=("Consolas", 10),
+                              bg="#263238", fg="#B0BEC5")
         scrollbar = ttk.Scrollbar(
             text_frame, orient=tk.VERTICAL, command=text_widget.yview)
         text_widget.configure(yscrollcommand=scrollbar.set)
@@ -857,70 +582,84 @@ class POApp(tk.Tk):
         text_widget.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        # Populate with staff mapping data
-        text_widget.insert(tk.END, "STAFF - STORE CODE MAPPING\n")
+        text_widget.tag_config("header", foreground="#64B5F6",
+                               font=("Consolas", 11, "bold"))
+        text_widget.tag_config("staff", foreground="#81C784",
+                               font=("Consolas", 10, "bold"))
+
+        text_widget.insert(tk.END, "STAFF - STORE CODE MAPPING\n", "header")
         text_widget.insert(tk.END, "=" * 50 + "\n\n")
 
         for staff_name, store_codes in self._staff_mapping_data.items():
-            text_widget.insert(tk.END, f"Staff: {staff_name}\n")
+            text_widget.insert(tk.END, f"Staff: {staff_name}\n", "staff")
             text_widget.insert(
                 tk.END, f"Store Codes ({len(store_codes)}): {', '.join(sorted(store_codes))}\n")
             text_widget.insert(tk.END, "-" * 30 + "\n\n")
 
-        text_widget.config(state=tk.DISABLED)  # Make read-only
+        text_widget.config(state=tk.DISABLED)
 
-        # Add close button
         ttk.Button(staff_window, text="Đóng",
                    command=staff_window.destroy).pack(pady=10)
+
+    # ===== Worker Thread =====
 
     def _on_start(self):
         if self._worker_thread and self._worker_thread.is_alive():
             messagebox.showwarning(
                 "Đang chạy", "Quá trình đang chạy, vui lòng chờ.")
             return
-        # basic validation
-        input_val = self.input_paths_var.get().strip()
-        list_val = self.list_var.get().strip()
+
         output_val = self.output_var.get().strip()
-        pattern = DEFAULT_PATTERN
-        if not input_val:
-            messagebox.showerror("Lỗi", "Vui lòng chọn file/folder chứa PDF.")
+        if not output_val:
+            messagebox.showerror("Lỗi", "Vui lòng chọn nơi lưu file output.")
             return
-        if not list_val or not Path(list_val).exists():
-            messagebox.showerror(
-                "Lỗi", "Vui lòng chọn file danh sách mã cửa hàng (CSV/TXT) hợp lệ.")
-            return
-        # disable start button during work
+
+        # Save settings before starting
+        self._save_current_settings()
+
+        # Disable start button and reset UI
         self.start_btn.config(state=tk.DISABLED)
         self.progress['value'] = 0
         self.log_text.delete(1.0, tk.END)
+        self.step_tracker.reset()
 
-        # Clear previous staff mapping data and disable button
+        # Clear previous staff mapping data
         if hasattr(self, '_staff_mapping_data'):
             delattr(self, '_staff_mapping_data')
         self.view_staff_btn.config(state=tk.DISABLED)
 
-        # prepare input files list
-        inputs = [p.strip() for p in input_val.split(",") if p.strip()]
+        # Collect input paths
+        inputs = self._get_all_paths()
 
-        # start worker thread
-        self._worker_thread = threading.Thread(target=self._worker_run, args=(
-            inputs, list_val, output_val, pattern), daemon=True)
+        # Start worker thread
+        self._worker_thread = threading.Thread(
+            target=self._worker_run,
+            args=(inputs, self.list_var.get().strip(), output_val, DEFAULT_PATTERN),
+            daemon=True
+        )
         self._worker_thread.start()
 
     def _worker_run(self, inputs, list_file, output_file, pattern):
         log = logging.getLogger("po_merge_tool")
         try:
+            # Step 1: Read files
+            self.step_tracker.activate_step("read")
             log.info("Bắt đầu xử lý...")
+
             pdfs = collect_input_pdfs(inputs, None)
             if not pdfs:
                 log.error("Không tìm thấy file PDF nào. Hãy kiểm tra input.")
+                self.step_tracker.error_step("read")
                 return
             log.info("Tổng file PDF: %d", len(pdfs))
+
             store_order = read_store_list(Path(list_file))
             log.info("Danh sách mã load xong: %d mã", len(store_order))
+            self.step_tracker.complete_step("read")
 
-            # Progress mapping: extraction 0-70%, merge+annotate+finalize 70-100%
+            # Step 2: Extract
+            self.step_tracker.activate_step("extract")
+
             def extract_progress(done, total):
                 try:
                     pct = int((done / total) * 70) if total else 0
@@ -930,7 +669,6 @@ class POApp(tk.Tk):
 
             def merge_progress(done, total):
                 try:
-                    # Map merge/write/annotate/finalize to 70-100 based on relative steps
                     base = 70
                     span = 30
                     pct = base + (int((done / total) * span) if total else 0)
@@ -940,11 +678,11 @@ class POApp(tk.Tk):
 
             result = extract_store_pages(
                 pdfs, pattern, extract_progress, logger=log)
-            # Ensure we land at 70% after extraction
             try:
                 self.progress['value'] = max(self.progress['value'], 70)
             except Exception:
                 pass
+
             found_codes = set(result.store_pages.keys())
             expected_codes = set([c.upper() for c in store_order])
             missing = expected_codes - found_codes
@@ -956,14 +694,18 @@ class POApp(tk.Tk):
                 log.warning("Dư mã cửa hàng (Có trong file PDF nhưng không có trong list): %s", ", ".join(
                     list(extra)[:20]) + ("" if len(extra) <= 20 else " ..."))
 
-            # Load optional code->name mapping from the selected list file (supports 1 or 2 columns)
+            self.step_tracker.complete_step("extract")
+
+            # Step 3: Merge
+            self.step_tracker.activate_step("merge")
+
+            # Load optional mappings
             code_name_map: Optional[Dict[str, str]] = None
             try:
                 code_name_map = read_code_name_map(Path(list_file))
             except Exception:
                 code_name_map = None
 
-            # Load staff mapping if available
             code_staff_map: Optional[Dict[str, str]] = None
             try:
                 code_staff_map = read_code_staff_map(Path(list_file))
@@ -971,7 +713,6 @@ class POApp(tk.Tk):
                     log.info("Đã load mapping staff cho %d mã cửa hàng",
                              len(code_staff_map))
 
-                    # Log detailed staff-store code mapping
                     log.info("=== MAPPING STAFF - STORE CODES ===")
                     staff_store_summary: Dict[str, List[str]] = {}
                     for store_code, staff_name in code_staff_map.items():
@@ -985,17 +726,8 @@ class POApp(tk.Tk):
                                  staff_name, len(store_codes), ", ".join(store_codes))
                     log.info("==================================")
 
-                    # Store staff mapping data for GUI display
+                    # Store for GUI display
                     self._staff_mapping_data = staff_store_summary
-
-                    # Create staff report file
-                    # try:
-                    #     output_path = Path(output_file)
-                    #     staff_report = create_staff_report(
-                    #         code_staff_map, output_path.parent, log)
-                    #     log.info("Báo cáo staff đã được tạo: %s", staff_report)
-                    # except Exception as e:
-                    #     log.warning("Không thể tạo báo cáo staff: %s", e)
             except Exception:
                 code_staff_map = None
 
@@ -1005,40 +737,36 @@ class POApp(tk.Tk):
                             code_to_name=code_name_map,
                             code_staff_map=code_staff_map)
 
+            self.step_tracker.complete_step("merge")
+
+            # Step 4: Done
+            self.step_tracker.complete_step("done")
             log.info("Hoàn tất. Output: %s", output_file)
 
-            # Enable staff mapping button if data is available
+            # Enable staff mapping button
             if hasattr(self, '_staff_mapping_data') and self._staff_mapping_data:
                 self.view_staff_btn.config(state=tk.NORMAL)
 
             try:
                 messagebox.showinfo(
-                    "Xong", f"Hoàn tất! Kết quả: {output_file}")
+                    "Xong", f"Hoàn tất! Kết quả:\n{output_file}")
             except Exception:
                 pass
         except Exception as e:
             log.exception("Lỗi khi chạy: %s", e)
-            messagebox.showerror("Lỗi", f"Đã xảy ra lỗi: {e}")
+            # Mark current active step as error
+            for _, key in StepTracker.STEPS:
+                self.step_tracker.error_step(key)
+            messagebox.showerror("Lỗi", f"Đã xảy ra lỗi:\n{e}")
         finally:
             self.start_btn.config(state=tk.NORMAL)
             self.progress['value'] = 100
 
 
+# ===== Entry Point =====
+
 def main():
-    parser = argparse.ArgumentParser(
-        description="PO Merge Tool - Trích xuất và hợp nhất Purchase Order theo thứ tự")
-    parser.add_argument(
-        "--input-folder", help="Folder chứa các PDF (tất cả .pdf trong folder sẽ theo thứ tự alpha)")
-    parser.add_argument("--input-files", nargs="*",
-                        help="Các file pdf (hoặc folder) -- có thể truyền nhiều")
-    parser.add_argument(
-        "--list-file", help="File danh sách mã cửa hàng (CSV hoặc TXT)")
-    parser.add_argument(
-        "--output", help="Đường dẫn file PDF output hoặc thư mục để lưu file", default="PO_FINAL.pdf")
-    parser.add_argument(
-        "--pattern", help="Regex pattern để tìm mã (mặc định: SG\\d{4})", default=DEFAULT_PATTERN)
-    parser.add_argument("--gui", action="store_true",
-                        help="Mở giao diện đồ họa (GUI)")
+    parser = build_parser()
     args = parser.parse_args()
 
     if args.gui or (not any([args.input_folder, args.input_files, args.list_file]) and TK_AVAILABLE):
@@ -1046,90 +774,21 @@ def main():
             print(
                 "Tkinter không khả dụng trên hệ thống này. Hãy chạy không dùng --gui hoặc cài tkinter.")
             return
-        app = POApp()
-        app.mainloop()
-        return
+        
+        # Try loading Modern CustomTkinter GUI first
+        try:
+            from gui_modern import launch_modern_gui
+            launch_modern_gui()
+            return
+        except Exception as e:
+            # Fallback to Classic Tkinter GUI
+            logging.getLogger("po_merge_tool").warning("Falling back to classic Tkinter GUI: %s", e)
+            app = POApp()
+            app.mainloop()
+            return
 
     # CLI mode
-    inp = collect_input_pdfs(args.input_files, args.input_folder)
-    if not inp:
-        logger.error(
-            "No input PDFs found. Provide --input-folder or --input-files.")
-        return
-    if not args.list_file or not Path(args.list_file).exists():
-        logger.error("List file not found. Provide --list-file.")
-        return
-
-    logger.info("Input pdfs: %s", ", ".join(map(str, inp)))
-    logger.info("Store list: %s", args.list_file)
-
-    store_order = read_store_list(Path(args.list_file))
-    logger.info("Store list loaded: %d codes", len(store_order))
-
-    # progress bar in CLI: simple text
-    def cli_progress(done, total):
-        pct = int(done / total * 100) if total else 0
-        print(f"Progress: {pct}% ({done}/{total})", end="\r")
-
-    result = extract_store_pages(
-        inp, args.pattern, progress_cb=cli_progress, logger=logger)
-    print()
-    found_codes = set(result.store_pages.keys())
-    expected_codes = set([c.upper() for c in store_order])
-    missing = expected_codes - found_codes
-    extra = found_codes - expected_codes
-    if missing:
-        logger.warning("Missing codes (in list but not found in PDFs): %s", ", ".join(
-            list(missing)[:20]) + ("" if len(missing) <= 20 else " ..."))
-    if extra:
-        logger.warning("Extra detected codes (found in PDFs but not in list): %s", ", ".join(
-            list(extra)[:20]) + ("" if len(extra) <= 20 else " ..."))
-
-    # Load optional code->name mapping from the provided list file (supports 1 or 2 columns)
-    code_name_map: Optional[Dict[str, str]] = None
-    try:
-        code_name_map = read_code_name_map(Path(args.list_file))
-    except Exception:
-        code_name_map = None
-
-    # Load optional staff mapping from the provided list file (supports 3 columns: code, name, staff)
-    code_staff_map: Optional[Dict[str, str]] = None
-    try:
-        code_staff_map = read_code_staff_map(Path(args.list_file))
-        if code_staff_map:
-            logger.info("Staff mapping loaded for %d store codes",
-                        len(code_staff_map))
-
-            # Log detailed staff-store code mapping
-            logger.info("=== MAPPING STAFF - STORE CODES ===")
-            staff_store_summary: Dict[str, List[str]] = {}
-            for store_code, staff_name in code_staff_map.items():
-                if staff_name not in staff_store_summary:
-                    staff_store_summary[staff_name] = []
-                staff_store_summary[staff_name].append(store_code)
-
-            for staff_name in sorted(staff_store_summary.keys()):
-                store_codes = sorted(staff_store_summary[staff_name])
-                logger.info("Staff '%s' manages %d store codes: %s",
-                            staff_name, len(store_codes), ", ".join(store_codes))
-            logger.info("==================================")
-
-            # # Create staff report file
-            # try:
-            #     output_path = Path(args.output)
-            #     staff_report = create_staff_report(
-            #         code_staff_map, output_path.parent, logger)
-            #     logger.info("Staff report created: %s", staff_report)
-            # except Exception as e:
-            #     logger.warning("Could not create staff report: %s", e)
-    except Exception:
-        code_staff_map = None
-
-    merge_and_write(result.store_pages, store_order,
-                    Path(args.output), logger=logger,
-                    code_to_name=code_name_map,
-                    code_staff_map=code_staff_map)
-    logger.info("Done. Logfile: %s", LOGFILE)
+    run_cli(args)
 
 
 if __name__ == "__main__":
