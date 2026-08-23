@@ -9,7 +9,10 @@ export class BrowserSession {
 
   async launch(): Promise<Browser> {
     if (!this.browser) {
-      this.browser = await chromium.launch({ headless: this.config.headless });
+      this.browser = await chromium.launch({
+        headless: this.config.headless,
+        args: this.config.headless ? [] : ["--start-maximized"],
+      });
     }
 
     return this.browser;
@@ -19,7 +22,9 @@ export class BrowserSession {
     const browser = await this.launch();
 
     if (!this.context) {
-      this.context = await browser.newContext();
+      this.context = await browser.newContext({
+        viewport: this.config.headless ? { width: 1280, height: 720 } : null,
+      });
     }
 
     return this.context;

@@ -12,7 +12,7 @@ export class LoginPage extends BasePage {
   }
 
   async open(): Promise<void> {
-    await this.page.goto(this.config.circleKBaseUrl);
+    await this.page.goto(this.config.circleKBaseUrl, { waitUntil: "domcontentloaded" });
     await this.waitForPageReady();
   }
 

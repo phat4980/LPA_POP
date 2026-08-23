@@ -13,7 +13,14 @@
     "dev": "tsx watch src/main.ts",
     "test": "node --test",
     "smoke:login": "node --import tsx src/smoke/login.ts",
-    "smoke:po-inbox": "node --import tsx src/smoke/poInbox.ts"
+    "smoke:po-inbox": "node --import tsx src/smoke/poInbox.ts",
+    "smoke:date-picker": "node --import tsx src/smoke/datePicker.ts",
+    "smoke:search": "node --import tsx src/smoke/search.ts",
+    "smoke:select-all": "node --import tsx src/smoke/selectAll.ts",
+    "smoke:pdf-generation": "node --import tsx src/smoke/pdfGeneration.ts",
+    "smoke:pdf-download": "node --import tsx src/smoke/pdfDownload.ts",
+    "smoke:pagination": "node --import tsx src/smoke/pagination.ts",
+    "automation:circlek-po-inbox": "node --import tsx src/runCircleKPOInbox.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.7",
