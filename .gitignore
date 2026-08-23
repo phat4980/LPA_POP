@@ -71,6 +71,13 @@ Thumbs.db
 *.bak
 *.tmp
 
+# Node automation runtime and local dependencies
+apps/automation/node_modules/
+apps/automation/.env
+apps/automation/playwright-report/
+apps/automation/test-results/
+storage/
+
 # CSV data
 ListMCH.csv
 MCH.csv

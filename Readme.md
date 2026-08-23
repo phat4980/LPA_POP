@@ -31,7 +31,7 @@ python src/po_merge_tool_gui.py
 python src/web_app.py
 ```
 
-Mở `http://127.0.0.1:8080` (bind localhost). Có hai chế độ:
+Mở `http://127.0.0.1:8088` (bind localhost). Web 2 hiện có hai chế độ:
 
 - **Upload**: kéo thả PDF + CSV trên trình duyệt
 - **Đường dẫn máy**: trỏ folder/file trên disk — dùng cho automation
@@ -58,12 +58,12 @@ python src/po_merge_tool_gui.py --input-folder ./pdfs --list-file stores.csv --o
 
 ## 4. API (automation)
 
-Server chỉ lắng nghe `127.0.0.1:8080`.
+Server chỉ lắng nghe `127.0.0.1:8088`.
 
 Tạo job bằng path trên máy (không upload):
 
 ```sh
-curl -X POST http://127.0.0.1:8080/api/jobs -H "Content-Type: application/json" -d "{\"pdf_folder\":\"D:/PO/inbox\",\"list_file\":\"D:/PO/MCH.csv\",\"output\":\"D:/PO/out/PO.pdf\"}"
+curl -X POST http://127.0.0.1:8088/api/jobs -H "Content-Type: application/json" -d "{\"pdf_folder\":\"D:/PO/inbox\",\"list_file\":\"D:/PO/MCH.csv\",\"output\":\"D:/PO/out/PO.pdf\"}"
 ```
 
 | Method | Path | Mô tả |
