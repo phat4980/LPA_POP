@@ -1,3 +1,4 @@
+
 # LPA POP - PO Automation Implementation Plan
 
 > This plan is based on the repository as it exists on 2026-08-23. It is incremental: preserve the working Python PO tool first, then add Circle K automation around it.
@@ -6,19 +7,19 @@
 
 The repository is currently a Python application. The planned Node.js/TypeScript automation layer does not exist yet.
 
-| Area | Current location | Verified responsibility | Status |
-|---|---|---|---|
-| Desktop GUI | `src/gui_modern.py`, `src/po_merge_tool_gui.py` | CustomTkinter/Tk workflows, PDF selection, merge, dashboard/staff/settings | Existing |
-| Web UI | `web/index.html`, `web/app.js`, `web/styles.css` | Vanilla HTML/CSS/JS UI for the PO merge service | Existing |
-| Web API | `src/web_app.py` | FastAPI app, upload/path jobs, settings, staff, PDF download, SSE events | Existing |
-| PO business logic | `src/core.py` | Read codes, extract PO pages, merge and annotate Qty | Existing; do not rewrite |
-| Web job worker | `src/jobs.py` | In-memory jobs with background threads and SSE | Existing; not persistent |
-| Configuration | `src/config.py` | `%APPDATA%\\LPA_POP` settings/jobs, app constants, port `8088` | Existing |
-| Python dependencies | `requirements.txt` | FastAPI, Uvicorn, PDF libraries, CustomTkinter and other installed packages | Existing |
-| Build artifacts | `build/`, `dist/`, `__pycache__/` | Generated files | Do not use as source |
-| Sample/runtime files | `po/`, `output/`, `po_merge_tool.log` | Local PDFs, output and logs | Treat as data/artifacts |
-| Tests | `test/` | Existing test area; currently ignored by `.gitignore` | Needs cleanup before reliable test evidence |
-| Node/TypeScript | None | No `package.json`, `tsconfig.json`, Playwright project or Node source | Not started |
+| Area                 | Current location                                       | Verified responsibility                                                     | Status                                      |
+| -------------------- | ------------------------------------------------------ | --------------------------------------------------------------------------- | ------------------------------------------- |
+| Desktop GUI          | `src/gui_modern.py`, `src/po_merge_tool_gui.py`    | CustomTkinter/Tk workflows, PDF selection, merge, dashboard/staff/settings  | Existing                                    |
+| Web UI               | `web/index.html`, `web/app.js`, `web/styles.css` | Vanilla HTML/CSS/JS UI for the PO merge service                             | Existing                                    |
+| Web API              | `src/web_app.py`                                     | FastAPI app, upload/path jobs, settings, staff, PDF download, SSE events    | Existing                                    |
+| PO business logic    | `src/core.py`                                        | Read codes, extract PO pages, merge and annotate Qty                        | Existing; do not rewrite                    |
+| Web job worker       | `src/jobs.py`                                        | In-memory jobs with background threads and SSE                              | Existing; not persistent                    |
+| Configuration        | `src/config.py`                                      | `%APPDATA%\\LPA_POP` settings/jobs, app constants, port `8088`          | Existing                                    |
+| Python dependencies  | `requirements.txt`                                   | FastAPI, Uvicorn, PDF libraries, CustomTkinter and other installed packages | Existing                                    |
+| Build artifacts      | `build/`, `dist/`, `__pycache__/`                | Generated files                                                             | Do not use as source                        |
+| Sample/runtime files | `po/`, `output/`, `po_merge_tool.log`            | Local PDFs, output and logs                                                 | Treat as data/artifacts                     |
+| Tests                | `test/`                                              | Existing test area; currently ignored by`.gitignore`                      | Needs cleanup before reliable test evidence |
+| Node/TypeScript      | None                                                   | No`package.json`, `tsconfig.json`, Playwright project or Node source    | Not started                                 |
 
 ### Current commands
 
@@ -308,6 +309,12 @@ error, createdAt, startedAt, completedAt
 
 Start in-memory only if restart recovery is explicitly deferred. Use SQLite when history, retry or recovery begins. Do not add Redis/Kafka/brokers without a demonstrated need.
 
+`autoPrint: boolean` is an approved additive field on this job model, added
+during Phase 7.1 rather than now, so the dashboard can distinguish "waiting
+for the user to click Print" from "will print automatically." This follows
+the same additive-extension pattern already used for `getJobEvents()`; it is
+not a redesign of this phase's data model.
+
 Minimum automation endpoints:
 
 ```text
@@ -317,54 +324,153 @@ GET  /api/automation/jobs/:id/events
 GET  /api/automation/jobs/:id/files
 ```
 
-## 9. Phase 7 - Automation Dashboard
+`POST /api/automation/jobs/:id/print` is out of scope for this phase and is
+added in Phase 7.1 alongside `PrintService`.
+
+## 9. Phase 7 - Automation Dashboard & Printing (Merged)
 
 **Status: TODO / AFTER BACKEND VERTICAL SLICE**
 
-The current `web/` is a Web 2 merge interface, not the final Circle K dashboard. Decide explicitly whether to extend `web/` with an automation view or create `apps/dashboard/`.
+Merges the former Phase 7 (Automation Dashboard) and Phase 8 (Printing).
+Rationale: printing is not a separate concern from the user's perspective —
+it is the last step of the same "Execute" workflow — and shipping the
+dashboard without a working print action would just require reopening it
+later.
 
-Prefer extending `web/` for the first usable version to avoid duplicate frontends, provided it can call the Node API cleanly. Create `apps/dashboard/` only when the existing Web 2 UI becomes difficult to maintain.
+### Architecture
 
-The non-technical workflow should contain only:
+The current `web/` is a Web 2 merge interface, not the final Circle K
+dashboard. **Decision: extend `web/` with `web/automation.html`, do not
+create `apps/dashboard/`.** `apps/dashboard/` becomes justified only when
+the existing Web 2 UI becomes genuinely difficult to maintain, not
+preemptively — same scope-control principle as the rest of this plan.
 
-- delivery date picker;
-- one primary Execute button;
-- current step and progress;
-- clear success/failure message;
-- downloaded PO count;
-- final PDF preview/download;
-- retry action when supported.
+### Frontend stack
 
-Do not expose Circle K selectors, filesystem paths, JSON or API details in the primary workflow.
+**Alpine.js**, downloaded and served locally from `web/vendor/alpinejs/`
+(not loaded from a CDN, so the dashboard keeps working on a private/
+air-gapped host). No bundler, no build step.
+
+- htmx was considered and rejected: it expects the backend to return HTML
+  fragments, while the Phase 6 automation API returns JSON only, by design.
+- React/Vue were considered and rejected: unnecessary build tooling and
+  routing for a single page with ~6 UI states.
+- Vanilla JS remains an acceptable fallback if zero dependencies is
+  preferred; the UX rules below apply either way.
+
+The JS layer's only job: call the Node automation API via `fetch`, poll
+`GET /api/automation/jobs/:id` every ~1.5-2s until a terminal state, and
+render.
+
+### UX rules for non-technical users
+
+- One primary action: disable Execute while a job is running to prevent
+  double submission.
+- Never show raw status: map `currentStep`/`status` enum values to short
+  human-readable labels; never render the raw enum string or raw JSON.
+- Show progress as a visual bar, not a number alone.
+- Map known failure states (`FAILED`, `PRINT_FAILED`) to a short
+  plain-language explanation plus a clear next action; never show a raw
+  error string, stack trace or API error body.
+- The final PDF stays reachable once it exists, even if printing later
+  fails; never hide `finalFile` behind a failed print state.
+- No technical leakage: no Circle K selectors, filesystem paths, raw JSON
+  or API endpoint names anywhere in the primary workflow.
+- Accessibility basics: proper label on the date input, visible focus
+  states on buttons, `aria-live="polite"` on the progress/status region.
+- Do not over-design: no animations or visual flourishes beyond what
+  communicates state; this is an internal operations tool.
+
+### Printing
+
+**Decision: explicit "Print" button, plus an optional "Auto-print"
+checkbox next to Execute.** By default the job stops at `FINAL_READY` and
+the user reviews the PDF, then clicks Print as a deliberate second action.
+If Auto-print is checked when the job is created, the job proceeds through
+`PRINTING` automatically. Rationale: paper coming out of a printer as a
+side effect of one Execute click is a surprising, hard-to-undo action if
+the wrong delivery date was picked; making it opt-in keeps Execute focused
+on *producing* the file while still allowing a one-click flow for users who
+want it.
+
+Backend rules (carried over unchanged from the original Phase 8 scope):
+
+- Validate the final file exists before attempting to print.
+- Use an explicit, configured printer; never let user input select an
+  arbitrary printer or path.
+- Never invoke a shell command with unvalidated user input.
+- Print outcome must resolve to exactly one of `PRINTING` -> `COMPLETED` or
+  `PRINTING` -> `PRINT_FAILED`, per the existing Phase 6 state machine; no
+  new states.
+- The final PDF remains downloadable/previewable regardless of print
+  outcome.
+
+New backend surface required (not yet built, see Phase 6 note on
+`autoPrint`):
+
+- `POST /api/automation/jobs/:id/print` - triggers the print step
+  explicitly; valid only when the job is in `FINAL_READY`.
+- `apps/automation/src/printing/PrintService.ts` + `scripts/print.ps1`, per
+  the original Phase 8 layout.
+
+### Printer configuration (confirmed)
+
+- Target printer: **Brother HL-L2321D**, monochrome laser, **USB-only**
+  (no network/WiFi interface). This means the automation service must run
+  on the same Windows host the printer is physically connected to; remote
+  printing across machines is not supported by this hardware.
+- Default print mode: **simplex (1 mặt)**. The printer supports automatic
+  duplex, but PO output defaults to one-sided; duplex is not enabled by
+  default.
+- Print mechanism: Windows/PowerShell has no reliable built-in way to
+  print a PDF to a named printer silently with a clean exit code.
+  `scripts/print.ps1` uses **SumatraPDF (portable)** as the actual print
+  invoker (`SumatraPDF.exe -print-to "<printer name>" -print-settings "simplex" -silent <file>`), vendored as a small binary under `scripts/`.
+  This is the one new binary dependency introduced by this phase; it is
+  not a build tool and does not affect `web/` or `apps/automation`'s
+  npm dependency tree.
+
+### Required non-technical workflow
+
+1. User selects a delivery date, optionally checks Auto-print.
+2. User clicks Execute once.
+3. User sees current step and progress.
+4. User can preview and download the final PDF.
+5. User triggers Print explicitly, unless Auto-print was checked.
+6. A failure explains what can be retried and preserves source artifacts;
+   nothing already downloaded or produced is lost because a later step
+   failed.
+
+### Suggested delivery breakdown
+
+- **7.1 - Print Trigger API & PrintService** (backend): `POST .../print`
+  endpoint, `PrintService.ts`, `scripts/print.ps1`, the additive `autoPrint`
+  job field, wired into the existing state machine. No UI yet.
+- **7.2 - Dashboard UI** (frontend): `web/automation.html`, Alpine.js
+  (vendored locally), polling against the Phase 6 API plus the new 7.1
+  print endpoint, PDF preview/download, error/retry messaging per the UX
+  rules above.
+- **7.3 - Non-Technical Workflow Acceptance Pass**: walk through the six
+  numbered steps above end-to-end against a real (or fixture) job and
+  confirm nothing technical leaks into the UI.
+
+A dedicated rule file (Alpine.js convention, `web/` structure, coding
+style) is written before 7.1/7.2/7.3, since Alpine.js is new to this repo
+and these sub-phases may run in separate agent sessions.
 
 Acceptance criteria:
 
 1. User selects a delivery date.
 2. User clicks Execute once.
 3. User sees the current step and progress.
-4. User can download the final PDF.
-5. A failure explains what can be retried and preserves source artifacts.
+4. User can preview and download the final PDF.
+5. User can print the final PDF, explicitly or automatically per the
+   Auto-print setting.
+6. A failure explains what can be retried and preserves source artifacts.
+7. No Circle K selectors, filesystem paths, JSON or API details are exposed
+   in the primary workflow.
 
-## 10. Phase 8 - Printing
-
-**Status: TODO / AFTER FINAL PDF IS STABLE**
-
-Add only after the final PDF workflow is reliable:
-
-```text
-scripts/print.ps1
-apps/automation/src/printing/PrintService.ts
-```
-
-Requirements:
-
-- Validate the final file exists.
-- Use an explicit/configured printer.
-- Never invoke a shell command with unvalidated user input.
-- Return `PRINTING`, `COMPLETED` or `PRINT_FAILED`.
-- Keep the final PDF available when printing fails.
-
-## 11. Phase 9 - Reliability, Recovery and Security
+## 10. Phase 8 - Reliability, Recovery and Security
 
 **Status: TODO / AFTER HAPPY PATH**
 
@@ -381,7 +487,7 @@ Every failure should report the automation job ID, failed step, cause, retry saf
 
 Credentials must come from environment variables or an OS-backed secret mechanism. Never store them in committed `.env`, browser storage state, screenshots or logs.
 
-## 12. Phase 10 - Testing and Validation
+## 11. Phase 9 - Testing and Validation
 
 **Status: TODO**
 
@@ -405,7 +511,7 @@ download fixture -> Web 2 multipart API -> final PDF
 
 A change in `src/core.py` must be able to fail a Python regression test without launching Circle K.
 
-## 13. Delivery Slices
+## 12. Delivery Slices
 
 ### Slice A - Baseline and contract
 
@@ -429,15 +535,27 @@ A change in `src/core.py` must be able to fail a Python regression test without 
 
 - Node job state, status endpoint, SSE, failure preservation.
 
-### Slice F - User dashboard
+### Slice F - Print trigger API (Phase 7.1)
 
-- Delivery date, Execute, progress, final file and retry messaging.
+- `POST /api/automation/jobs/:id/print`, `PrintService.ts`,
+  `scripts/print.ps1`, additive `autoPrint` job field. No UI yet.
 
-### Slice G - Print and recovery
+### Slice G - Dashboard UI (Phase 7.2)
 
-- PowerShell print service, SQLite history, resumable steps and focused tests.
+- `web/automation.html` on Alpine.js (vendored locally), delivery date,
+  Execute, Auto-print checkbox, progress, PDF preview/download, explicit
+  Print action, retry messaging.
 
-## 14. Definition of Done
+### Slice H - Dashboard acceptance pass (Phase 7.3)
+
+- End-to-end walkthrough of the six-step non-technical workflow; confirm no
+  technical leakage.
+
+### Slice I - Recovery and hardening (Phase 8)
+
+- SQLite history, resumable steps and focused tests.
+
+## 13. Definition of Done
 
 The system is complete only when the user can:
 
@@ -454,21 +572,20 @@ The system is complete only when the user can:
 
 The existing Web 2 must remain independently runnable throughout this work.
 
-## 15. Current Status Summary
+## 14. Current Status Summary
 
-| Phase | Status | Next evidence |
-|---|---|---|
-| Phase 0 - Baseline | DONE | Inventory and verified commands |
-| Phase 1 - Repository preparation | DONE | Node scaffold validated without Python moves |
-| Phase 2 - Existing Web 2/API | IMPLEMENTED; contract TODO | OpenAPI document and compatibility check |
-| Phase 3 - Circle K one-page proof | DONE | Login, date, PDF generation and download verified |
-| Phase 4 - Pagination/downloads | DONE | All detected pages downloaded with page-specific artifacts |
-| Phase 5 - Web 2 integration | DONE | Final PDF produced through existing `/api/jobs/upload` |
-| Phase 6 - Automation jobs | TODO | Status/retry/recovery model |
-| Phase 7 - Dashboard | TODO | Non-technical Execute workflow |
-| Phase 8 - Printing | TODO | Safe print command and result state |
-| Phase 9 - Reliability/security | TODO | Recovery and redacted diagnostics |
-| Phase 10 - Testing | TODO | Python, Node, Playwright and integration evidence |
+| Phase                                   | Status                     | Next evidence                                                        |
+| --------------------------------------- | -------------------------- | -------------------------------------------------------------------- |
+| Phase 0 - Baseline                      | DONE                       | Inventory and verified commands                                      |
+| Phase 1 - Repository preparation        | DONE                       | Node scaffold validated without Python moves                         |
+| Phase 2 - Existing Web 2/API            | IMPLEMENTED; contract TODO | OpenAPI document and compatibility check                             |
+| Phase 3 - Circle K one-page proof       | DONE                       | Login, date, PDF generation and download verified                    |
+| Phase 4 - Pagination/downloads          | DONE                       | All detected pages downloaded with page-specific artifacts           |
+| Phase 5 - Web 2 integration             | DONE                       | Final PDF produced through existing`/api/jobs/upload`              |
+| Phase 6 - Automation jobs               | TODO                       | Status/retry/recovery model                                          |
+| Phase 7 - Dashboard & Printing (merged) | TODO                       | Rule file, then 7.1 print API, 7.2 dashboard UI, 7.3 acceptance pass |
+| Phase 8 - Reliability/security          | TODO                       | Recovery and redacted diagnostics                                    |
+| Phase 9 - Testing                       | TODO                       | Python, Node, Playwright and integration evidence                    |
 
 ## Final Principle
 

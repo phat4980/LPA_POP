@@ -27,6 +27,7 @@ test("creates a queued job with default values", () => {
     pythonJobId: null,
     sourceFiles: [],
     finalFile: null,
+    autoPrint: false,
     error: null,
     createdAt: "2026-08-23T08:00:00.000Z",
     startedAt: null,

@@ -10,6 +10,9 @@ import type { AutomationWorkflow } from "./AutomationWorkflow.js";
 import type { AutomationJobEventType } from "./AutomationJobEvent.js";
 import type { AutomationJobEvent } from "./AutomationJobEvent.js";
 import { logJobEvent, type JobLogSink } from "./JobLogger.js";
+import type { PrintOutcome } from "../printing/PrintService.js";
+
+export interface AutomationPrintService { print(jobId: string): Promise<PrintOutcome>; }
 
 const progress = {
   downloading: 20,
@@ -23,6 +26,7 @@ export class AutomationJobService {
     private readonly repository: AutomationJobRepository,
     private readonly workflow: AutomationWorkflow,
     private readonly logSink?: JobLogSink,
+    private readonly printService?: AutomationPrintService,
   ) {}
 
   createJob(input: CreateAutomationJobInput): AutomationJob {
@@ -78,10 +82,18 @@ export class AutomationJobService {
     job = this.transition(job, AutomationJobStatus.FINAL_READY, progress.finalReady);
     job = this.update(job, { finalFile: processing.finalFile, pythonJobId: processing.pythonJobId });
     this.event(job, "FINAL_READY");
+    return job.autoPrint ? this.triggerPrint(job.automationJobId) : job;
+  }
+
+  async triggerPrint(automationJobId: string): Promise<AutomationJob> {
+    let job = this.requireJob(automationJobId);
+    if (job.status !== AutomationJobStatus.FINAL_READY) throw new Error("Printing is only available when the automation job is FINAL_READY.");
     job = this.transition(job, AutomationJobStatus.PRINTING, progress.printing);
     this.event(job, "PRINT_STARTED");
     try {
-      await this.workflow.print(job);
+      if (!this.printService) throw new Error("Print service is not configured.");
+      const outcome = await this.printService.print(job.automationJobId);
+      if (outcome === "PRINT_FAILED") return this.fail(job, AutomationJobStatus.PRINT_FAILED, new Error("Print service failed."));
     } catch (error) {
       return this.fail(job, AutomationJobStatus.PRINT_FAILED, error);
     }

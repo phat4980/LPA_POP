@@ -6,8 +6,8 @@ import { AutomationJobService } from "../jobs/AutomationJobService.js";
 import { FakeAutomationWorkflow } from "../jobs/FakeAutomationWorkflow.js";
 import { InMemoryAutomationJobRepository } from "../jobs/InMemoryAutomationJobRepository.js";
 
-async function withServer(run: (baseUrl: string, service: AutomationJobService) => Promise<void>): Promise<void> {
-  const service = new AutomationJobService(new InMemoryAutomationJobRepository(), new FakeAutomationWorkflow());
+async function withServer(run: (baseUrl: string, service: AutomationJobService) => Promise<void>, printOutcome: "COMPLETED" | "PRINT_FAILED" = "COMPLETED"): Promise<void> {
+  const service = new AutomationJobService(new InMemoryAutomationJobRepository(), new FakeAutomationWorkflow(), undefined, { print: async () => printOutcome });
   const server = createAutomationJobHttpServer(service);
   await listen(server);
   const address = server.address();
@@ -34,7 +34,7 @@ test("GET job, events, and files are scoped and missing ids are safe", async () 
   const job = await fetch(`${baseUrl}/api/automation/jobs/job-a`);
   assert.equal(job.status, 200); assert.equal((await json(job) as { automationJobId: string }).automationJobId, "job-a");
   const events = await fetch(`${baseUrl}/api/automation/jobs/job-a/events`);
-  assert.deepEqual((await json(events) as Array<{ type: string }>).map((event) => event.type), ["JOB_CREATED", "LOGIN_STARTED", "LOGIN_COMPLETED", "DOWNLOAD_STARTED", "DOWNLOAD_COMPLETED", "PROCESSING_STARTED", "PROCESSING_COMPLETED", "FINAL_READY", "PRINT_STARTED", "PRINT_COMPLETED"]);
+  assert.deepEqual((await json(events) as Array<{ type: string }>).map((event) => event.type), ["JOB_CREATED", "LOGIN_STARTED", "LOGIN_COMPLETED", "DOWNLOAD_STARTED", "DOWNLOAD_COMPLETED", "PROCESSING_STARTED", "PROCESSING_COMPLETED", "FINAL_READY"]);
   const files = await fetch(`${baseUrl}/api/automation/jobs/job-a/files`);
   assert.equal((await json(files) as { finalFile: { name: string } }).finalFile.name, "final.pdf");
   const other = await fetch(`${baseUrl}/api/automation/jobs/job-b/files`);
@@ -46,3 +46,23 @@ test("GET job, events, and files are scoped and missing ids are safe", async () 
     assert.equal(error.includes("password"), false); assert.equal(error.includes("C:\\"), false); assert.equal(error.includes("at "), false);
   }
 }));
+
+test("POST print uses the FINAL_READY trigger and retains the final file on either outcome", async () => {
+  await withServer(async (baseUrl, service) => {
+    const job = service.createJob({ automationJobId: "print-success", deliveryDate: "2026-08-24" });
+    await service.runJob(job.automationJobId);
+    const printed = await fetch(`${baseUrl}/api/automation/jobs/print-success/print`, { method: "POST" });
+    assert.equal(printed.status, 200);
+    const result = await json(printed) as { status: string; finalFile: { name: string } };
+    assert.equal(result.status, "COMPLETED"); assert.equal(result.finalFile.name, "final.pdf");
+    const repeated = await fetch(`${baseUrl}/api/automation/jobs/print-success/print`, { method: "POST" });
+    assert.equal(repeated.status, 409);
+  });
+  await withServer(async (baseUrl, service) => {
+    const job = service.createJob({ automationJobId: "print-failure", deliveryDate: "2026-08-24" });
+    await service.runJob(job.automationJobId);
+    const printed = await fetch(`${baseUrl}/api/automation/jobs/print-failure/print`, { method: "POST" });
+    const result = await json(printed) as { status: string; finalFile: { name: string } };
+    assert.equal(result.status, "PRINT_FAILED"); assert.equal(result.finalFile.name, "final.pdf");
+  }, "PRINT_FAILED");
+});

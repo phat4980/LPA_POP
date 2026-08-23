@@ -1,13 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { AutomationJobStatus } from "./AutomationJob.js";
-import { AutomationJobService } from "./AutomationJobService.js";
+import { AutomationJobService, type AutomationPrintService } from "./AutomationJobService.js";
 import { FakeAutomationWorkflow } from "./FakeAutomationWorkflow.js";
 import { InMemoryAutomationJobRepository } from "./InMemoryAutomationJobRepository.js";
 
-function createService(workflow: FakeAutomationWorkflow = new FakeAutomationWorkflow()) {
+function createService(workflow: FakeAutomationWorkflow = new FakeAutomationWorkflow(), printService?: AutomationPrintService) {
   const repository = new InMemoryAutomationJobRepository();
-  return { repository, workflow, service: new AutomationJobService(repository, workflow) };
+  return { repository, workflow, service: new AutomationJobService(repository, workflow, undefined, printService) };
 }
 
 function createJob(service: AutomationJobService) {
@@ -39,11 +39,11 @@ test("runs the full valid lifecycle with workflow-derived job data", async () =>
   const created = createJob(service);
   const completed = await service.runJob(created.automationJobId);
 
-  assert.equal(completed.status, AutomationJobStatus.COMPLETED);
-  assert.equal(completed.currentStep, "COMPLETED");
-  assert.equal(completed.progress, 100);
+  assert.equal(completed.status, AutomationJobStatus.FINAL_READY);
+  assert.equal(completed.currentStep, "FINALIZE");
+  assert.equal(completed.progress, 80);
   assert.ok(completed.startedAt);
-  assert.ok(completed.completedAt);
+  assert.equal(completed.completedAt, null);
   assert.equal(completed.downloadedCount, 1);
   assert.equal(completed.totalCount, 1);
   assert.equal(completed.sourceFiles.length, 1);
@@ -55,10 +55,9 @@ test("runs the full valid lifecycle with workflow-derived job data", async () =>
       [AutomationJobStatus.LOGGING_IN, "LOGIN", 0],
       [AutomationJobStatus.DOWNLOADING, "DOWNLOAD", 20],
       [AutomationJobStatus.PROCESSING, "PROCESS", 60],
-      [AutomationJobStatus.PRINTING, "PRINT", 90],
     ],
   );
-  assert.deepEqual(eventTypes(repository, created.automationJobId), ["JOB_CREATED", "LOGIN_STARTED", "LOGIN_COMPLETED", "DOWNLOAD_STARTED", "DOWNLOAD_COMPLETED", "PROCESSING_STARTED", "PROCESSING_COMPLETED", "FINAL_READY", "PRINT_STARTED", "PRINT_COMPLETED"]);
+  assert.deepEqual(eventTypes(repository, created.automationJobId), ["JOB_CREATED", "LOGIN_STARTED", "LOGIN_COMPLETED", "DOWNLOAD_STARTED", "DOWNLOAD_COMPLETED", "PROCESSING_STARTED", "PROCESSING_COMPLETED", "FINAL_READY"]);
 });
 
 for (const failingStep of ["login", "download", "process"] as const) {
@@ -87,19 +86,25 @@ for (const failingStep of ["login", "download", "process"] as const) {
   });
 }
 
-test("marks print failures as PRINT_FAILED", async () => {
-  const workflow = new FakeAutomationWorkflow({ failAt: "print" });
-  const { service, repository } = createService(workflow);
+test("uses the shared print trigger for manual successes and failures", async () => {
+  const { service, repository } = createService(undefined, { print: async () => "COMPLETED" });
   const created = createJob(service);
-  const failed = await service.runJob(created.automationJobId);
+  await service.runJob(created.automationJobId);
+  const completed = await service.triggerPrint(created.automationJobId);
+  assert.equal(completed.status, AutomationJobStatus.COMPLETED);
+  assert.equal(completed.finalFile?.name, "final.pdf");
+  const failedService = createService(undefined, { print: async () => "PRINT_FAILED" });
+  const failedJob = createJob(failedService.service);
+  await failedService.service.runJob(failedJob.automationJobId);
+  const failed = await failedService.service.triggerPrint(failedJob.automationJobId);
 
   assert.equal(failed.status, AutomationJobStatus.PRINT_FAILED);
   assert.equal(failed.currentStep, "PRINT");
-  assert.match(failed.error ?? "", /Fake workflow failed during print/);
+  assert.match(failed.error ?? "", /Print service failed/);
   assert.ok(failed.completedAt);
   assert.equal(failed.progress, 90);
   assert.equal(failed.finalFile?.name, "final.pdf");
-  assert.deepEqual(eventTypes(repository, created.automationJobId), ["JOB_CREATED", "LOGIN_STARTED", "LOGIN_COMPLETED", "DOWNLOAD_STARTED", "DOWNLOAD_COMPLETED", "PROCESSING_STARTED", "PROCESSING_COMPLETED", "FINAL_READY", "PRINT_STARTED", "PRINT_FAILED"]);
+  assert.deepEqual(eventTypes(repository, created.automationJobId), ["JOB_CREATED", "LOGIN_STARTED", "LOGIN_COMPLETED", "DOWNLOAD_STARTED", "DOWNLOAD_COMPLETED", "PROCESSING_STARTED", "PROCESSING_COMPLETED", "FINAL_READY", "PRINT_STARTED", "PRINT_COMPLETED"]);
 });
 
 test("uses the domain transition validator instead of bypassing lifecycle rules", async () => {
@@ -109,6 +114,6 @@ test("uses the domain transition validator instead of bypassing lifecycle rules"
 
   await assert.rejects(
     service.runJob(completed.automationJobId),
-    /Invalid automation job transition: COMPLETED -> LOGGING_IN/,
+    /Invalid automation job transition: FINAL_READY -> LOGGING_IN/,
   );
 });

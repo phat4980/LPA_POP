@@ -10,6 +10,8 @@ export type AutomationConfig = {
   circleKPassword: string;
   automationOutputDir: string;
   headless: boolean;
+  printerName: string;
+  printScriptPath: string;
 };
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AutomationConfig {
@@ -23,6 +25,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AutomationConf
     circleKPassword: env.CIRCLEK_PASSWORD ?? "",
     automationOutputDir: env.AUTOMATION_OUTPUT_DIR ?? "",
     headless: env.CIRCLEK_HEADLESS !== "false",
+    printerName: env.PRINTER_NAME ?? "Brother HL-L2321D",
+    printScriptPath: env.PRINT_SCRIPT_PATH ?? "../../scripts/print.ps1",
   };
 
   const requiredValues = [
@@ -30,6 +34,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AutomationConf
     ["CIRCLEK_USERNAME", config.circleKUsername],
     ["CIRCLEK_PASSWORD", config.circleKPassword],
     ["AUTOMATION_OUTPUT_DIR", config.automationOutputDir],
+    ["PRINTER_NAME", config.printerName],
   ] as const;
 
   const missing = requiredValues

@@ -31,7 +31,7 @@ test("closes the created BrowserSession when Circle K authentication fails after
 
   const { loginToCircleK } = await import("./CircleKPOInboxWorkflow.js");
   const { RealAutomationWorkflow } = await import("../jobs/RealAutomationWorkflow.js");
-  const config: AutomationConfig = { host: "127.0.0.1", port: 8090, web2BaseUrl: "http://web2", web2ListFile: "MCH.csv", circleKBaseUrl: "https://circlek.example/login", circleKUsername: "user", circleKPassword: "password", automationOutputDir: "out", headless: true };
+  const config: AutomationConfig = { host: "127.0.0.1", port: 8090, web2BaseUrl: "http://web2", web2ListFile: "MCH.csv", circleKBaseUrl: "https://circlek.example/login", circleKUsername: "user", circleKPassword: "password", automationOutputDir: "out", headless: true, printerName: "Test printer", printScriptPath: "scripts/print.ps1" };
   const circleK: CircleKAutomationPort = {
     login: (deliveryDate) => loginToCircleK(config, new Date(`${deliveryDate}T00:00:00`)),
     async download(): Promise<never> { throw new Error("download must not run after failed login"); },

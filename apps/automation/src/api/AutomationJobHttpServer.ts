@@ -14,7 +14,13 @@ async function route(request: IncomingMessage, response: ServerResponse, service
   if (request.method === "POST" && url.pathname === "/api/automation/jobs") {
     const body = await readJson(request);
     if (!isRecord(body) || typeof body.deliveryDate !== "string" || !body.deliveryDate.trim()) return respond(response, 400, { error: "deliveryDate is required" });
-    return respond(response, 201, service.createJob({ automationJobId: randomUUID(), deliveryDate: body.deliveryDate }));
+    if (body.autoPrint !== undefined && typeof body.autoPrint !== "boolean") return respond(response, 400, { error: "autoPrint must be a boolean" });
+    return respond(response, 201, service.createJob({ automationJobId: randomUUID(), deliveryDate: body.deliveryDate, autoPrint: body.autoPrint }));
+  }
+  const printMatch = /^\/api\/automation\/jobs\/([^/]+)\/print$/.exec(url.pathname);
+  if (request.method === "POST" && printMatch) {
+    try { return respond(response, 200, await service.triggerPrint(decodeURIComponent(printMatch[1]))); }
+    catch (error) { return respond(response, 409, { error: error instanceof Error ? error.message : "Print request failed" }); }
   }
   const match = /^\/api\/automation\/jobs\/([^/]+)(?:\/(events|files))?$/.exec(url.pathname);
   if (!match || request.method !== "GET") return respond(response, 404, { error: "Not found" });

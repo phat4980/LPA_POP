@@ -43,6 +43,7 @@ export type AutomationJob = {
   pythonJobId: string | null;
   sourceFiles: AutomationSourceFile[];
   finalFile: AutomationFinalFile | null;
+  autoPrint: boolean;
   error: string | null;
   createdAt: string;
   startedAt: string | null;
@@ -52,6 +53,7 @@ export type AutomationJob = {
 export type CreateAutomationJobInput = {
   automationJobId: string;
   deliveryDate: string;
+  autoPrint?: boolean;
 };
 
 export type TransitionAutomationJobOptions = {
@@ -95,6 +97,7 @@ export function createAutomationJob(
     pythonJobId: null,
     sourceFiles: [],
     finalFile: null,
+    autoPrint: input.autoPrint ?? false,
     error: null,
     createdAt: now.toISOString(),
     startedAt: null,
