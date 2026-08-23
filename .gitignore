@@ -76,6 +76,7 @@ apps/automation/node_modules/
 apps/automation/.env
 apps/automation/playwright-report/
 apps/automation/test-results/
+.playwright-mcp/
 storage/
 
 # CSV data

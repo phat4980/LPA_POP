@@ -11,7 +11,9 @@
     "build": "tsc --noEmit",
     "start": "node --import tsx src/main.ts",
     "dev": "tsx watch src/main.ts",
-    "test": "node --test"
+    "test": "node --test",
+    "smoke:login": "node --import tsx src/smoke/login.ts",
+    "smoke:po-inbox": "node --import tsx src/smoke/poInbox.ts"
   },
   "dependencies": {
     "dotenv": "^16.4.7",
