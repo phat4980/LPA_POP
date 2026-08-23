@@ -11,7 +11,7 @@
     "build": "tsc --noEmit",
     "start": "node --import tsx src/main.ts",
     "dev": "tsx watch src/main.ts",
-    "test": "node --import tsx --test src/utils/date.test.ts",
+    "test": "node --experimental-test-module-mocks --import tsx --test --test-concurrency=1 src/utils/date.test.ts src/jobs/AutomationJob.test.ts src/jobs/AutomationJobService.test.ts src/jobs/RealAutomationWorkflow.test.ts src/jobs/AutomationJobEvent.test.ts src/api/AutomationJobHttpServer.test.ts src/flows/CircleKPOInboxWorkflow.test.ts",
     "smoke:login": "node --import tsx src/smoke/login.ts",
     "smoke:po-inbox": "node --import tsx src/smoke/poInbox.ts",
     "smoke:date-picker": "node --import tsx src/smoke/datePicker.ts",
