@@ -1,0 +1,75 @@
+openapi: 3.0.3
+info:
+  title: LPA POP Web 2 API
+  version: 1.0.0
+  description: Existing FastAPI contract used by the Node Circle K automation service.
+servers:
+  - url: http://127.0.0.1:8088
+paths:
+  /api/health:
+    get:
+      responses:
+        '200':
+          description: Web 2 health status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok: { type: boolean }
+                  name: { type: string }
+                  version: { type: string }
+  /api/jobs/upload:
+    post:
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [pdfs, list_file]
+              properties:
+                pdfs:
+                  type: array
+                  items: { type: string, format: binary }
+                list_file: { type: string, format: binary }
+                output: { type: string }
+                pattern: { type: string }
+      responses:
+        '200':
+          description: Created Web 2 job
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Job' }
+  /api/jobs/{job_id}:
+    get:
+      parameters:
+        - { name: job_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Web 2 job status
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Job' }
+  /api/jobs/{job_id}/pdf:
+    get:
+      parameters:
+        - { name: job_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Final merged PDF
+          content:
+            application/pdf:
+              schema: { type: string, format: binary }
+components:
+  schemas:
+    Job:
+      type: object
+      required: [id, status]
+      properties:
+        id: { type: string }
+        status: { type: string, enum: [queued, running, done, error] }
+        step: { type: string }
+        progress: { type: number }
+        output_path: { type: string }
+        error: { type: string, nullable: true }

@@ -189,7 +189,7 @@ Add `packages/contracts/openapi.yaml` before considering cross-runtime integrati
 
 ## 5. Phase 3 - Circle K Automation Proof
 
-**Status: TODO / FIRST IMPLEMENTATION SLICE**
+**Status: DONE / VERIFIED AGAINST LIVE TEST ACCOUNT**
 
 Prerequisites:
 
@@ -223,7 +223,7 @@ Acceptance criteria:
 
 ## 6. Phase 4 - Pagination and Download Manager
 
-**Status: TODO / AFTER PHASE 3 PASSES**
+**Status: DONE / VERIFIED AGAINST LIVE TEST DATA**
 
 Expand only after the one-page proof is stable:
 
@@ -252,7 +252,7 @@ Acceptance criteria:
 
 ## 7. Phase 5 - Web 2 Integration
 
-**Status: TODO / AFTER DOWNLOAD SLICE**
+**Status: DONE / LOCAL END-TO-END VERIFIED**
 
 Create `apps/automation/src/web2/Web2Client.ts`.
 
@@ -267,6 +267,13 @@ Responsibilities:
 - Apply request timeouts and return actionable errors.
 
 Do not move merge, Qty annotation, store mapping or PDF parsing into TypeScript.
+
+Evidence completed on 2026-08-23:
+
+- The Circle K workflow downloaded 3 source PDFs for 109 POs across 3 dynamically detected pages (`50`, `50`, `9`).
+- `Web2Client` uploaded all source PDFs plus the configured `MCH.csv` to the existing `/api/jobs/upload` endpoint.
+- The client waited for the Python job to reach `done` and downloaded the final merged PDF.
+- The final artifact was verified under the configured output directory and was non-empty.
 
 Acceptance criteria:
 
@@ -454,9 +461,9 @@ The existing Web 2 must remain independently runnable throughout this work.
 | Phase 0 - Baseline | DONE | Inventory and verified commands |
 | Phase 1 - Repository preparation | DONE | Node scaffold validated without Python moves |
 | Phase 2 - Existing Web 2/API | IMPLEMENTED; contract TODO | OpenAPI document and compatibility check |
-| Phase 3 - Circle K one-page proof | TODO | One artifact and screenshot-on-failure |
-| Phase 4 - Pagination/downloads | TODO | Manifest and all pages |
-| Phase 5 - Web 2 integration | TODO | Final PDF through existing `/api/jobs/upload` |
+| Phase 3 - Circle K one-page proof | DONE | Login, date, PDF generation and download verified |
+| Phase 4 - Pagination/downloads | DONE | All detected pages downloaded with page-specific artifacts |
+| Phase 5 - Web 2 integration | DONE | Final PDF produced through existing `/api/jobs/upload` |
 | Phase 6 - Automation jobs | TODO | Status/retry/recovery model |
 | Phase 7 - Dashboard | TODO | Non-technical Execute workflow |
 | Phase 8 - Printing | TODO | Safe print command and result state |

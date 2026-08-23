@@ -11,7 +11,7 @@
     "build": "tsc --noEmit",
     "start": "node --import tsx src/main.ts",
     "dev": "tsx watch src/main.ts",
-    "test": "node --test",
+    "test": "node --import tsx --test src/utils/date.test.ts",
     "smoke:login": "node --import tsx src/smoke/login.ts",
     "smoke:po-inbox": "node --import tsx src/smoke/poInbox.ts",
     "smoke:date-picker": "node --import tsx src/smoke/datePicker.ts",

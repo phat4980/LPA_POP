@@ -3,6 +3,8 @@ import { BrowserSession } from "../browser/BrowserSession.js";
 import { LoginPage } from "../circlek/pages/LoginPage.js";
 import { POInboxPage } from "../circlek/pages/POInboxPage.js";
 import { PdfDownloadService, type DownloadedPdfArtifact } from "../services/PdfDownloadService.js";
+import { Web2Client, type Web2FinalArtifact } from "../services/Web2Client.js";
+import { createFinalPdfOutputPath } from "../utils/pdfFile.js";
 import { getNextCalendarDay } from "../utils/date.js";
 
 export type CircleKPOInboxPageResult = {
@@ -19,6 +21,7 @@ export type CircleKPOInboxWorkflowResult = {
   pdfsGenerated: number;
   pdfsDownloaded: number;
   artifacts: string[];
+  finalFile?: Web2FinalArtifact;
   pagesWithNoPORecords: number[];
   pageResults: CircleKPOInboxPageResult[];
   failures: string[];
@@ -28,9 +31,11 @@ export type CircleKPOInboxWorkflowResult = {
 export class CircleKPOInboxWorkflow {
   private readonly session: BrowserSession;
   private readonly pdfDownloadService = new PdfDownloadService();
+  private readonly web2Client: Web2Client;
 
   constructor(private readonly config: AutomationConfig) {
     this.session = new BrowserSession(config);
+    this.web2Client = new Web2Client({ baseUrl: config.web2BaseUrl });
   }
 
   async run(): Promise<CircleKPOInboxWorkflowResult> {
@@ -42,6 +47,7 @@ export class CircleKPOInboxWorkflow {
       pdfsGenerated: 0,
       pdfsDownloaded: 0,
       artifacts: [],
+      finalFile: undefined,
       pagesWithNoPORecords: [],
       pageResults: [],
       failures: [],
@@ -64,6 +70,10 @@ export class CircleKPOInboxWorkflow {
         result.pagesWithNoPORecords.push(1);
         result.success = true;
         return result;
+      }
+
+      if (!(await this.web2Client.healthCheck())) {
+        throw new Error("Web 2 health check failed.");
       }
 
       let pagination = await poInboxPage.getPaginationState();
@@ -95,6 +105,14 @@ export class CircleKPOInboxWorkflow {
         }
         pagination = await poInboxPage.goToNextPage();
       }
+
+      const web2Job = await this.web2Client.createUploadJob(
+        result.artifacts,
+        this.config.web2ListFile,
+      );
+      const completedJob = await this.web2Client.waitForCompletion(web2Job.id);
+      const finalPath = await createFinalPdfOutputPath(this.config.automationOutputDir, targetDate);
+      result.finalFile = await this.web2Client.downloadFinalPdf(completedJob.id, finalPath);
 
       result.success = true;
       return result;

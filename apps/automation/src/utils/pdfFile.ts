@@ -31,3 +31,7 @@ export function assertPdfOutputPath(filePath: string): void {
     throw new Error("PDF output path must be a filesystem PDF path.");
   }
 }
+
+export async function createFinalPdfOutputPath(outputDir: string, date: Date): Promise<string> {
+  return createPdfOutputPath(outputDir, date, undefined).then((path) => path.replace("circlek-po-inbox-batch-", "circlek-po-final-"));
+}
