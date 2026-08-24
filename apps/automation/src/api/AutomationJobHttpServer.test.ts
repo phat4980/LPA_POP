@@ -1,18 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Server } from "node:http";
+import { resolve } from "node:path";
 import { createAutomationJobHttpServer } from "./AutomationJobHttpServer.js";
+import { AutomationJobStatus } from "../jobs/AutomationJob.js";
 import { AutomationJobService } from "../jobs/AutomationJobService.js";
 import { FakeAutomationWorkflow } from "../jobs/FakeAutomationWorkflow.js";
 import { InMemoryAutomationJobRepository } from "../jobs/InMemoryAutomationJobRepository.js";
 
-async function withServer(run: (baseUrl: string, service: AutomationJobService) => Promise<void>, printOutcome: "COMPLETED" | "PRINT_FAILED" = "COMPLETED"): Promise<void> {
-  const service = new AutomationJobService(new InMemoryAutomationJobRepository(), new FakeAutomationWorkflow(), undefined, { print: async () => printOutcome });
+async function withServer(run: (baseUrl: string, service: AutomationJobService, repository: InMemoryAutomationJobRepository) => Promise<void>, printOutcome: "COMPLETED" | "PRINT_FAILED" = "COMPLETED"): Promise<void> {
+  const repository = new InMemoryAutomationJobRepository();
+  const service = new AutomationJobService(repository, new FakeAutomationWorkflow(), undefined, { print: async () => printOutcome });
   const server = createAutomationJobHttpServer(service);
   await listen(server);
   const address = server.address();
   assert.ok(address && typeof address !== "string");
-  try { await run(`http://127.0.0.1:${address.port}`, service); } finally { await close(server); }
+  try { await run(`http://127.0.0.1:${address.port}`, service, repository); } finally { await close(server); }
 }
 function listen(server: Server): Promise<void> { return new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); }); }
 function close(server: Server): Promise<void> { return new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
@@ -25,6 +28,43 @@ test("POST creates a queued job immediately and validates input", async () => wi
   assert.equal(job.status, "QUEUED"); assert.ok(job.automationJobId);
   const invalid = await fetch(`${baseUrl}/api/automation/jobs`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
   assert.equal(invalid.status, 400); assert.deepEqual(await json(invalid), { error: "deliveryDate is required" });
+}));
+
+test("applies explicit CORS to automation GET and preflight requests only", async () => withServer(async (baseUrl) => {
+  const allowedOrigin = "http://127.0.0.1:8088";
+  const getResponse = await fetch(`${baseUrl}/api/automation/jobs/missing`, { headers: { Origin: allowedOrigin } });
+  assert.equal(getResponse.status, 404);
+  assert.equal(getResponse.headers.get("access-control-allow-origin"), allowedOrigin);
+
+  const preflight = await fetch(`${baseUrl}/api/automation/jobs`, {
+    method: "OPTIONS",
+    headers: { Origin: allowedOrigin, "Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "Content-Type" },
+  });
+  assert.equal(preflight.status, 204);
+  assert.equal(preflight.headers.get("access-control-allow-origin"), allowedOrigin);
+  assert.equal(preflight.headers.get("access-control-allow-methods"), "GET, POST, OPTIONS");
+  assert.equal(preflight.headers.get("access-control-allow-headers"), "Content-Type");
+
+  const blocked = await fetch(`${baseUrl}/api/automation/jobs/missing`, { headers: { Origin: "http://127.0.0.1:9999" } });
+  assert.equal(blocked.headers.has("access-control-allow-origin"), false);
+  const nonAutomation = await fetch(`${baseUrl}/other`, { headers: { Origin: allowedOrigin } });
+  assert.equal(nonAutomation.headers.has("access-control-allow-origin"), false);
+}));
+
+test("downloads final PDF bytes and hides missing-file paths", async () => withServer(async (baseUrl, service, repository) => {
+  const fixturePath = resolve(process.cwd(), "../../scripts/vendor/test-fixture.pdf");
+  const job = service.createJob({ automationJobId: "download-job", deliveryDate: "2026-08-24" });
+  repository.update({ ...job, status: AutomationJobStatus.FINAL_READY, currentStep: "FINALIZE", progress: 80, finalFile: { path: fixturePath, name: "test-fixture.pdf" } });
+  const download = await fetch(`${baseUrl}/api/automation/jobs/download-job/download`);
+  assert.equal(download.status, 200);
+  assert.equal(download.headers.get("content-type"), "application/pdf");
+  assert.match(download.headers.get("content-disposition") ?? "", /attachment; filename="test-fixture\.pdf"/);
+  assert.ok((await download.arrayBuffer()).byteLength > 0);
+
+  repository.update({ ...repository.getById(job.automationJobId)!, finalFile: { path: "missing.pdf", name: "secret.pdf" } });
+  const missing = await fetch(`${baseUrl}/api/automation/jobs/download-job/download`);
+  assert.equal(missing.status, 404);
+  assert.deepEqual(await json(missing), { error: "PDF file is not available" });
 }));
 
 test("POST rejects every invalid print option at both API entry points", async () => withServer(async (baseUrl) => {
