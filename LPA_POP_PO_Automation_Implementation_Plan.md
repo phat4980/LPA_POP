@@ -415,7 +415,7 @@ New backend surface required (not yet built, see Phase 6 note on
 
 ### Printer configuration (confirmed)
 
-- Target printer: **Brother HL-L2321D**, monochrome laser, **USB-only**
+- Target printer: **Brother HL-L2320D series**, monochrome laser, **USB-only**
   (no network/WiFi interface). This means the automation service must run
   on the same Windows host the printer is physically connected to; remote
   printing across machines is not supported by this hardware.

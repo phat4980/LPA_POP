@@ -84,7 +84,6 @@ ListMCH.csv
 MCH.csv
 
 # Executables
-*.exe
 *.spec
 
 # PyInstaller build

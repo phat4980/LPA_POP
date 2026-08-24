@@ -25,7 +25,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AutomationConf
     circleKPassword: env.CIRCLEK_PASSWORD ?? "",
     automationOutputDir: env.AUTOMATION_OUTPUT_DIR ?? "",
     headless: env.CIRCLEK_HEADLESS !== "false",
-    printerName: env.PRINTER_NAME ?? "Brother HL-L2321D",
+    printerName: env.PRINTER_NAME ?? "Brother HL-L2320D series",
     printScriptPath: env.PRINT_SCRIPT_PATH ?? "../../scripts/print.ps1",
   };
 

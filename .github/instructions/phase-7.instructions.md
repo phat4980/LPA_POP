@@ -197,7 +197,7 @@ this is where they get implemented.)
 
 ### Hardware & mechanism (confirmed)
 
-- Target printer: **Brother HL-L2321D**, monochrome laser, **USB-only**
+- Target printer: **Brother HL-L2320D series**, monochrome laser, **USB-only**
   (no network interface). The automation service must run on the same
   Windows host the printer is physically attached to.
 - Default output: **simplex (1-sided)**. Do not enable duplex by default;
@@ -223,7 +223,7 @@ this is where they get implemented.)
 - Validate the final file exists on disk (not just that `finalFile` is set
   in job state) before invoking `print.ps1`.
 - Invoke the printer via a fixed, configured script path and a fixed
-  printer name (`"Brother HL-L2321D"`, or the exact Windows printer queue
+  printer name (`"Brother HL-L2320D series"`, or the exact Windows printer queue
   name — verify against `Get-Printer` on the target host, it may differ
   slightly from the model name) read from environment/config — **never
   interpolate the job ID, file path, or any request field directly into a
