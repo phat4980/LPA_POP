@@ -10,9 +10,9 @@ import type { AutomationWorkflow } from "./AutomationWorkflow.js";
 import type { AutomationJobEventType } from "./AutomationJobEvent.js";
 import type { AutomationJobEvent } from "./AutomationJobEvent.js";
 import { logJobEvent, type JobLogSink } from "./JobLogger.js";
-import type { PrintOutcome } from "../printing/PrintService.js";
+import { validatePrintOptions, type PrintOptions, type PrintOutcome } from "../printing/PrintService.js";
 
-export interface AutomationPrintService { print(jobId: string): Promise<PrintOutcome>; }
+export interface AutomationPrintService { print(jobId: string, options?: PrintOptions): Promise<PrintOutcome>; }
 
 const progress = {
   downloading: 20,
@@ -30,6 +30,7 @@ export class AutomationJobService {
   ) {}
 
   createJob(input: CreateAutomationJobInput): AutomationJob {
+    if (input.printOptions !== undefined) validatePrintOptions(input.printOptions);
     const job = this.repository.create(createAutomationJob(input));
     this.event(job, "JOB_CREATED");
     return job;
@@ -85,14 +86,15 @@ export class AutomationJobService {
     return job.autoPrint ? this.triggerPrint(job.automationJobId) : job;
   }
 
-  async triggerPrint(automationJobId: string): Promise<AutomationJob> {
+  async triggerPrint(automationJobId: string, options?: PrintOptions): Promise<AutomationJob> {
+    if (options !== undefined) validatePrintOptions(options);
     let job = this.requireJob(automationJobId);
     if (job.status !== AutomationJobStatus.FINAL_READY) throw new Error("Printing is only available when the automation job is FINAL_READY.");
     job = this.transition(job, AutomationJobStatus.PRINTING, progress.printing);
     this.event(job, "PRINT_STARTED");
     try {
       if (!this.printService) throw new Error("Print service is not configured.");
-      const outcome = await this.printService.print(job.automationJobId);
+      const outcome = await this.printService.print(job.automationJobId, options);
       if (outcome === "PRINT_FAILED") return this.fail(job, AutomationJobStatus.PRINT_FAILED, new Error("Print service failed."));
     } catch (error) {
       return this.fail(job, AutomationJobStatus.PRINT_FAILED, error);

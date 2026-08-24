@@ -1,6 +1,7 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { randomUUID } from "node:crypto";
 import type { AutomationJobService } from "../jobs/AutomationJobService.js";
+import { validatePrintOptions } from "../printing/PrintService.js";
 
 export function createAutomationJobHttpServer(service: AutomationJobService): Server {
   return createServer(async (request, response) => {
@@ -15,11 +16,22 @@ async function route(request: IncomingMessage, response: ServerResponse, service
     const body = await readJson(request);
     if (!isRecord(body) || typeof body.deliveryDate !== "string" || !body.deliveryDate.trim()) return respond(response, 400, { error: "deliveryDate is required" });
     if (body.autoPrint !== undefined && typeof body.autoPrint !== "boolean") return respond(response, 400, { error: "autoPrint must be a boolean" });
-    return respond(response, 201, service.createJob({ automationJobId: randomUUID(), deliveryDate: body.deliveryDate, autoPrint: body.autoPrint }));
+    if (body.printSettings !== undefined || body["-print-settings"] !== undefined) return respond(response, 400, { error: "Raw print settings are not accepted" });
+    let printOptions;
+    try { if (body.printOptions !== undefined) printOptions = validatePrintOptions(body.printOptions); }
+    catch (error) { return respond(response, 400, { error: error instanceof Error ? error.message : "Invalid printOptions" }); }
+    return respond(response, 201, service.createJob({ automationJobId: randomUUID(), deliveryDate: body.deliveryDate, autoPrint: body.autoPrint, printOptions }));
   }
   const printMatch = /^\/api\/automation\/jobs\/([^/]+)\/print$/.exec(url.pathname);
   if (request.method === "POST" && printMatch) {
-    try { return respond(response, 200, await service.triggerPrint(decodeURIComponent(printMatch[1]))); }
+    const body = await readJson(request);
+    let printOptions;
+    try {
+      if (body !== null && isRecord(body) && Object.keys(body).some((key) => key !== "printOptions")) return respond(response, 400, { error: "Only printOptions is accepted in the print request body" });
+      if (body !== null && isRecord(body) && body.printOptions !== undefined) printOptions = validatePrintOptions(body.printOptions);
+      else if (body !== null && !isRecord(body)) return respond(response, 400, { error: "Request body must be an object" });
+    } catch (error) { return respond(response, 400, { error: error instanceof Error ? error.message : "Invalid printOptions" }); }
+    try { return respond(response, 200, await service.triggerPrint(decodeURIComponent(printMatch[1]), printOptions)); }
     catch (error) { return respond(response, 409, { error: error instanceof Error ? error.message : "Print request failed" }); }
   }
   const match = /^\/api\/automation\/jobs\/([^/]+)(?:\/(events|files))?$/.exec(url.pathname);

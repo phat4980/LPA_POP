@@ -32,6 +32,8 @@ export type AutomationFinalFile = {
   size?: number;
 };
 
+import type { PrintOptions } from "../printing/PrintService.js";
+
 export type AutomationJob = {
   automationJobId: string;
   deliveryDate: string;
@@ -44,6 +46,7 @@ export type AutomationJob = {
   sourceFiles: AutomationSourceFile[];
   finalFile: AutomationFinalFile | null;
   autoPrint: boolean;
+  printOptions?: PrintOptions;
   error: string | null;
   createdAt: string;
   startedAt: string | null;
@@ -54,6 +57,7 @@ export type CreateAutomationJobInput = {
   automationJobId: string;
   deliveryDate: string;
   autoPrint?: boolean;
+  printOptions?: PrintOptions;
 };
 
 export type TransitionAutomationJobOptions = {
@@ -98,6 +102,7 @@ export function createAutomationJob(
     sourceFiles: [],
     finalFile: null,
     autoPrint: input.autoPrint ?? false,
+    ...(input.printOptions === undefined ? {} : { printOptions: input.printOptions }),
     error: null,
     createdAt: now.toISOString(),
     startedAt: null,

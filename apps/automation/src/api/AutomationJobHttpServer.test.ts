@@ -27,6 +27,21 @@ test("POST creates a queued job immediately and validates input", async () => wi
   assert.equal(invalid.status, 400); assert.deepEqual(await json(invalid), { error: "deliveryDate is required" });
 }));
 
+test("POST rejects every invalid print option at both API entry points", async () => withServer(async (baseUrl) => {
+  const invalidOptions = [
+    { copies: 0 }, { copies: 1.5 }, { pageRange: "1,,2" },
+    { paperSize: "A3" }, { layout: "diagonal" }, { fitMode: "scale" },
+  ];
+  for (const printOptions of invalidOptions) {
+    const created = await fetch(`${baseUrl}/api/automation/jobs`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ deliveryDate: "2026-08-24", printOptions }) });
+    assert.equal(created.status, 400);
+    const printed = await fetch(`${baseUrl}/api/automation/jobs/missing/print`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ printOptions }) });
+    assert.equal(printed.status, 400);
+  }
+  const raw = await fetch(`${baseUrl}/api/automation/jobs/missing/print`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ "-print-settings": "duplex" }) });
+  assert.equal(raw.status, 400);
+}));
+
 test("GET job, events, and files are scoped and missing ids are safe", async () => withServer(async (baseUrl, service) => {
   const a = service.createJob({ automationJobId: "job-a", deliveryDate: "2026-08-24" });
   const b = service.createJob({ automationJobId: "job-b", deliveryDate: "2026-08-25" });

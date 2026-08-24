@@ -6,19 +6,19 @@
 
 The repository is currently a Python application. The planned Node.js/TypeScript automation layer does not exist yet.
 
-| Area                 | Current location                                       | Verified responsibility                                                     | Status                                      |
-| -------------------- | ------------------------------------------------------ | --------------------------------------------------------------------------- | ------------------------------------------- |
-| Desktop GUI          | `src/gui_modern.py`, `src/po_merge_tool_gui.py`    | CustomTkinter/Tk workflows, PDF selection, merge, dashboard/staff/settings  | Existing                                    |
-| Web UI               | `web/index.html`, `web/app.js`, `web/styles.css` | Vanilla HTML/CSS/JS UI for the PO merge service                             | Existing                                    |
-| Web API              | `src/web_app.py`                                     | FastAPI app, upload/path jobs, settings, staff, PDF download, SSE events    | Existing                                    |
-| PO business logic    | `src/core.py`                                        | Read codes, extract PO pages, merge and annotate Qty                        | Existing; do not rewrite                    |
-| Web job worker       | `src/jobs.py`                                        | In-memory jobs with background threads and SSE                              | Existing; not persistent                    |
-| Configuration        | `src/config.py`                                      | `%APPDATA%\\LPA_POP` settings/jobs, app constants, port `8088`          | Existing                                    |
-| Python dependencies  | `requirements.txt`                                   | FastAPI, Uvicorn, PDF libraries, CustomTkinter and other installed packages | Existing                                    |
-| Build artifacts      | `build/`, `dist/`, `__pycache__/`                | Generated files                                                             | Do not use as source                        |
-| Sample/runtime files | `po/`, `output/`, `po_merge_tool.log`            | Local PDFs, output and logs                                                 | Treat as data/artifacts                     |
-| Tests                | `test/`                                              | Existing test area; currently ignored by`.gitignore`                      | Needs cleanup before reliable test evidence |
-| Node/TypeScript      | None                                                   | No`package.json`, `tsconfig.json`, Playwright project or Node source    | Not started                                 |
+| Area | Current location | Verified responsibility | Status |
+|---|---|---|---|
+| Desktop GUI | `src/gui_modern.py`, `src/po_merge_tool_gui.py` | CustomTkinter/Tk workflows, PDF selection, merge, dashboard/staff/settings | Existing |
+| Web UI | `web/index.html`, `web/app.js`, `web/styles.css` | Vanilla HTML/CSS/JS UI for the PO merge service | Existing |
+| Web API | `src/web_app.py` | FastAPI app, upload/path jobs, settings, staff, PDF download, SSE events | Existing |
+| PO business logic | `src/core.py` | Read codes, extract PO pages, merge and annotate Qty | Existing; do not rewrite |
+| Web job worker | `src/jobs.py` | In-memory jobs with background threads and SSE | Existing; not persistent |
+| Configuration | `src/config.py` | `%APPDATA%\\LPA_POP` settings/jobs, app constants, port `8088` | Existing |
+| Python dependencies | `requirements.txt` | FastAPI, Uvicorn, PDF libraries, CustomTkinter and other installed packages | Existing |
+| Build artifacts | `build/`, `dist/`, `__pycache__/` | Generated files | Do not use as source |
+| Sample/runtime files | `po/`, `output/`, `po_merge_tool.log` | Local PDFs, output and logs | Treat as data/artifacts |
+| Tests | `test/` | Existing test area; currently ignored by `.gitignore` | Needs cleanup before reliable test evidence |
+| Node/TypeScript | None | No `package.json`, `tsconfig.json`, Playwright project or Node source | Not started |
 
 ### Current commands
 
@@ -328,7 +328,9 @@ added in Phase 7.1 alongside `PrintService`.
 
 ## 9. Phase 7 - Automation Dashboard & Printing (Merged)
 
-**Status: TODO / AFTER BACKEND VERTICAL SLICE**
+**Status: 7.1 (Print Trigger API, PrintService, configurable print
+options) DONE and verified on real hardware. 7.2 (Dashboard UI) and 7.3
+(Acceptance Pass) TODO.**
 
 Merges the former Phase 7 (Automation Dashboard) and Phase 8 (Printing).
 Rationale: printing is not a separate concern from the user's perspective —
@@ -429,7 +431,8 @@ New backend surface required (not yet built, see Phase 6 note on
   print a PDF to a named printer silently with a clean exit code.
   `scripts/print.ps1` uses **SumatraPDF (portable)** as the actual print
   invoker, vendored as a small binary under `scripts/vendor/`. SumatraPDF
-  is a GUI-subsystem executable, so the script uses `Start-Process -Wait -PassThru` and reads `.ExitCode` from the returned process object —
+  is a GUI-subsystem executable, so the script uses `Start-Process -Wait
+  -PassThru` and reads `.ExitCode` from the returned process object —
   `$LASTEXITCODE` after the `&` call operator is unreliable for this class
   of executable and was the root cause of a false-negative bug found
   during 7.1 verification (fixed). Printer names and file paths passed to
@@ -445,9 +448,9 @@ additive `printOptions` field, stored on the job record alongside
 `autoPrint`:
 
 ```text
-copies: number       (1-20, default 2)
+copies: number       (1-20, default 1)
 pageRange: string    (Sumatra range syntax, e.g. "1-3,5"; default: all pages)
-paperSize: 'A4' | 'Letter' | 'A5'   (default 'A5')
+paperSize: 'A4' | 'Letter' | 'A5'   (default 'A4')
 layout: 'portrait' | 'landscape'    (default 'portrait')
 fitMode: 'fit' | 'noscale' | 'shrink'   (default 'fit')
 ```
@@ -618,18 +621,18 @@ The existing Web 2 must remain independently runnable throughout this work.
 
 ## 14. Current Status Summary
 
-| Phase                                   | Status                     | Next evidence                                                        |
-| --------------------------------------- | -------------------------- | -------------------------------------------------------------------- |
-| Phase 0 - Baseline                      | DONE                       | Inventory and verified commands                                      |
-| Phase 1 - Repository preparation        | DONE                       | Node scaffold validated without Python moves                         |
-| Phase 2 - Existing Web 2/API            | IMPLEMENTED; contract TODO | OpenAPI document and compatibility check                             |
-| Phase 3 - Circle K one-page proof       | DONE                       | Login, date, PDF generation and download verified                    |
-| Phase 4 - Pagination/downloads          | DONE                       | All detected pages downloaded with page-specific artifacts           |
-| Phase 5 - Web 2 integration             | DONE                       | Final PDF produced through existing`/api/jobs/upload`              |
-| Phase 6 - Automation jobs               | TODO                       | Status/retry/recovery model                                          |
-| Phase 7 - Dashboard & Printing (merged) | TODO                       | Rule file, then 7.1 print API, 7.2 dashboard UI, 7.3 acceptance pass |
-| Phase 8 - Reliability/security          | TODO                       | Recovery and redacted diagnostics                                    |
-| Phase 9 - Testing                       | TODO                       | Python, Node, Playwright and integration evidence                    |
+| Phase | Status | Next evidence |
+|---|---|---|
+| Phase 0 - Baseline | DONE | Inventory and verified commands |
+| Phase 1 - Repository preparation | DONE | Node scaffold validated without Python moves |
+| Phase 2 - Existing Web 2/API | IMPLEMENTED; contract TODO | OpenAPI document and compatibility check |
+| Phase 3 - Circle K one-page proof | DONE | Login, date, PDF generation and download verified |
+| Phase 4 - Pagination/downloads | DONE | All detected pages downloaded with page-specific artifacts |
+| Phase 5 - Web 2 integration | DONE | Final PDF produced through existing `/api/jobs/upload` |
+| Phase 6 - Automation jobs | TODO | Status/retry/recovery model |
+| Phase 7 - Dashboard & Printing (merged) | 7.1 DONE (verified on real Brother HL-L2320D series hardware); 7.2/7.3 TODO | Dashboard UI (7.2), then acceptance pass (7.3) |
+| Phase 8 - Reliability/security | TODO | Recovery and redacted diagnostics |
+| Phase 9 - Testing | TODO | Python, Node, Playwright and integration evidence |
 
 ## Final Principle
 
