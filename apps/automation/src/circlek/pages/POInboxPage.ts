@@ -14,6 +14,8 @@ export type POInboxSelectionResult =
 
 export type BatchPdfResult = {
   page: Page;
+  response: import("playwright").Response;
+  pdfUrl: string;
   responseContentType: string;
 };
 
@@ -126,22 +128,25 @@ export class POInboxPage extends BasePage {
     }
 
     const context = this.page.context();
-    const [pdfPage, pdfResponse] = await Promise.all([
-      context.waitForEvent("page"),
-      context.waitForEvent("response", {
-        predicate: (response) => response.url().includes("/trade/poDetails/printBatch")
-          && response.headers()["content-type"]?.toLowerCase().includes("application/pdf") === true,
-      }),
-      batchPrint.click(),
-    ]);
+    const pdfPagePromise = context.waitForEvent("page");
+    const pdfResponsePromise = context.waitForEvent("response", {
+      predicate: (response) => response.url().includes("/trade/poDetails/printBatch")
+        && response.headers()["content-type"]?.toLowerCase().includes("application/pdf") === true,
+    });
+    const clickPromise = batchPrint.click();
+    const pdfResponse = await pdfResponsePromise;
+    const pdfUrl = pdfResponse.url();
+    const pdfPage = await pdfPagePromise;
+    await clickPromise;
 
-    await pdfPage.waitForLoadState("domcontentloaded");
-    if (!pdfPage.url().includes("/trade/poDetails/printBatch")) {
-      throw new Error("Circle K batch print opened an unexpected page.");
+    if (!pdfUrl.includes("/trade/poDetails/printBatch")) {
+      throw new Error("Circle K batch print returned an unexpected PDF response.");
     }
 
     return {
       page: pdfPage,
+      pdfUrl,
+      response: pdfResponse,
       responseContentType: pdfResponse.headers()["content-type"] ?? "",
     };
   }

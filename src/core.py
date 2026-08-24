@@ -518,7 +518,8 @@ def annotate_quantities(pdf_path: Path, logger: Optional[logging.Logger] = None,
             for i, (page, qty) in enumerate(zip(doc, qty_values)):
                 if qty is not None:
                     text = str(qty)
-                    x, y = page.rect.width - 40, page.rect.height - 1
+                    one_cm_points = 72 / 2.54
+                    x, y = page.rect.width - 40, page.rect.height - 1 - one_cm_points
                     page.insert_font(fontname=roboto_font_name,
                                      fontfile=str(roboto_path))
                     page.insert_text((x, y), text, fontsize=20,

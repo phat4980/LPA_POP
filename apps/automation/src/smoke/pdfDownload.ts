@@ -26,6 +26,8 @@ try {
     batchPdf.page,
     config.automationOutputDir,
     targetDate,
+    undefined,
+    batchPdf.pdfUrl,
   );
 
   console.log(`PO count processed: ${searchResult.resultCount}`);

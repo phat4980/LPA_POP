@@ -78,7 +78,7 @@ async function processCurrentPage(context: CircleKSessionContext, pageNumber: nu
   const selection = await context.poInboxPage.selectAllCurrentPage();
   if (selection.status === "no-records") return { pageNumber, poCount: 0, pdfGenerated: false };
   const batchPdf = await context.poInboxPage.generateBatchPdf(); let artifact: DownloadedPdfArtifact | undefined;
-  try { artifact = await context.pdfDownloadService.downloadBatchPdf(batchPdf.page, outputDir, context.targetDate, pageNumber); } finally { await batchPdf.page.close(); }
+  try { artifact = await context.pdfDownloadService.downloadBatchPdf(batchPdf.page, outputDir, context.targetDate, pageNumber, batchPdf.pdfUrl); } finally { await batchPdf.page.close(); }
   await context.poInboxPage.verifyUsable(); return { pageNumber, poCount: selection.selectedCount, pdfGenerated: true, artifact };
 }
 function formatDate(date: Date): string { return [date.getFullYear(), date.getMonth() + 1, date.getDate()].map((part, index) => index === 0 ? String(part) : String(part).padStart(2, "0")).join("-"); }

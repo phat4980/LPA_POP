@@ -20,6 +20,16 @@ async function withServer(run: (baseUrl: string, service: AutomationJobService, 
 function listen(server: Server): Promise<void> { return new Promise((resolve, reject) => { server.once("error", reject); server.listen(0, "127.0.0.1", resolve); }); }
 function close(server: Server): Promise<void> { return new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve())); }
 async function json(response: Response): Promise<unknown> { return response.json(); }
+async function waitForStatus(baseUrl: string, jobId: string): Promise<string> {
+  const deadline = Date.now() + 500;
+  while (Date.now() < deadline) {
+    const response = await fetch(`${baseUrl}/api/automation/jobs/${jobId}`);
+    const job = await json(response) as { status: string };
+    if (job.status !== "QUEUED") return job.status;
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
+  }
+  return "QUEUED";
+}
 
 test("POST creates a queued job immediately and validates input", async () => withServer(async (baseUrl) => {
   const created = await fetch(`${baseUrl}/api/automation/jobs`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ deliveryDate: "2026-08-24" }) });
@@ -28,6 +38,14 @@ test("POST creates a queued job immediately and validates input", async () => wi
   assert.equal(job.status, "QUEUED"); assert.ok(job.automationJobId);
   const invalid = await fetch(`${baseUrl}/api/automation/jobs`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
   assert.equal(invalid.status, 400); assert.deepEqual(await json(invalid), { error: "deliveryDate is required" });
+}));
+
+test("POST starts the created job without waiting for workflow completion", async () => withServer(async (baseUrl) => {
+  const created = await fetch(`${baseUrl}/api/automation/jobs`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ deliveryDate: "2026-08-24" }) });
+  assert.equal(created.status, 201);
+  const job = await json(created) as { automationJobId: string; status: string };
+  assert.equal(job.status, "QUEUED");
+  assert.notEqual(await waitForStatus(baseUrl, job.automationJobId), "QUEUED");
 }));
 
 test("applies explicit CORS to automation GET and preflight requests only", async () => withServer(async (baseUrl) => {

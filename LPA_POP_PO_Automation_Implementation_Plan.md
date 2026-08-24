@@ -329,8 +329,15 @@ added in Phase 7.1 alongside `PrintService`.
 ## 9. Phase 7 - Automation Dashboard & Printing (Merged)
 
 **Status: 7.1 (Print Trigger API, PrintService, configurable print
-options) DONE and verified on real hardware. 7.2 (Dashboard UI) and 7.3
-(Acceptance Pass) TODO.**
+options) DONE, verified on real hardware. 7.2 (Dashboard UI, download
+endpoint, CORS) REOPENED — a blocking bug was found during manual CORS
+re-verification: `POST /api/automation/jobs` never actually starts the
+job (`createJob()` and `runJob()` were never wired together in the HTTP
+layer), so jobs stay in `QUEUED` forever. The prior "real browser, no
+CORS errors" verification confirmed the network layer only, not that a
+job actually runs — that gap is now being fixed via a dedicated addendum
+before 7.2 can be considered closed. 7.3 (Acceptance Pass) not yet
+started.**
 
 Merges the former Phase 7 (Automation Dashboard) and Phase 8 (Printing).
 Rationale: printing is not a separate concern from the user's perspective —
@@ -630,7 +637,7 @@ The existing Web 2 must remain independently runnable throughout this work.
 | Phase 4 - Pagination/downloads | DONE | All detected pages downloaded with page-specific artifacts |
 | Phase 5 - Web 2 integration | DONE | Final PDF produced through existing `/api/jobs/upload` |
 | Phase 6 - Automation jobs | TODO | Status/retry/recovery model |
-| Phase 7 - Dashboard & Printing (merged) | 7.1 DONE (verified on real Brother HL-L2320D series hardware); 7.2/7.3 TODO | Dashboard UI (7.2), then acceptance pass (7.3) |
+| Phase 7 - Dashboard & Printing (merged) | 7.1 DONE (real hardware verified); 7.2 REOPENED (runJob wiring bug found, fix in progress); 7.3 not started | Fix runJob wiring, re-close 7.2, then full acceptance walkthrough |
 | Phase 8 - Reliability/security | TODO | Recovery and redacted diagnostics |
 | Phase 9 - Testing | TODO | Python, Node, Playwright and integration evidence |
 

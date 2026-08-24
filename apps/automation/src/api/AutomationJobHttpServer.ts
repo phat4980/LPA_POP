@@ -35,7 +35,12 @@ async function route(request: IncomingMessage, response: ServerResponse, service
     let printOptions;
     try { if (body.printOptions !== undefined) printOptions = validatePrintOptions(body.printOptions); }
     catch (error) { return respond(response, 400, { error: error instanceof Error ? error.message : "Invalid printOptions" }); }
-    return respond(response, 201, service.createJob({ automationJobId: randomUUID(), deliveryDate: body.deliveryDate, autoPrint: body.autoPrint, printOptions }));
+    const job = service.createJob({ automationJobId: randomUUID(), deliveryDate: body.deliveryDate, autoPrint: body.autoPrint, printOptions });
+    const result = respond(response, 201, job);
+    void service.runJob(job.automationJobId).catch((error) => {
+      console.error(`Automation job ${job.automationJobId} failed to start:`, error);
+    });
+    return result;
   }
   const printMatch = /^\/api\/automation\/jobs\/([^/]+)\/print$/.exec(url.pathname);
   if (request.method === "POST" && printMatch) {
