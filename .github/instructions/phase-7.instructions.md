@@ -195,47 +195,84 @@ this is where they get implemented.)
 
 ## 7. Printing (`PrintService.ts`, backend — Phase 7.1)
 
-### Hardware & mechanism (confirmed)
+### Hardware & mechanism (confirmed, verified on real host)
 
-- Target printer: **Brother HL-L2320D series**, monochrome laser, **USB-only**
-  (no network interface). The automation service must run on the same
-  Windows host the printer is physically attached to.
-- Default output: **simplex (1-sided)**. Do not enable duplex by default;
-  the printer supports it, but PO output is one-sided unless a future
-  phase adds a duplex option deliberately.
-- Print invoker: **SumatraPDF (portable)**, vendored as a small binary
-  under `scripts/` (e.g. `scripts/vendor/SumatraPDF.exe`), since neither
-  PowerShell nor Windows offers a built-in, silent, exit-code-clean way to
-  print a PDF to a named printer. `print.ps1` shells out to it, e.g.:
-
-  ```powershell
-  & $sumatraPath -print-to $PrinterName -print-settings "simplex" -silent $FilePath
-  ```
-
-  This is a print-invocation utility, not a build tool — it does not touch
-  `web/` or `apps/automation`'s npm dependency tree.
+- Target printer: **Brother HL-L2321D**. **Actual Windows queue name is
+  `"Brother HL-L2320D series"`** — the driver is shared across the
+  HL-L2320D/L2321D family, so the queue name does not match the model
+  printed on the device. Always verify with `Get-Printer` on any new
+  host; never assume the model name is the queue name.
+- Default output: **simplex (1-sided)**.
+- Print invoker: **SumatraPDF (portable)**, vendored under
+  `scripts/vendor/sumatrapdf-3.6.1/`. Authenticity verified via
+  Authenticode signature (`Get-AuthenticodeSignature`, signer: Krzysztof
+  Kowalczyk) rather than a published checksum — SumatraPDF does not
+  publish official hashes for cross-verification, so the signature check
+  is the reliable integrity method, not a SHA-256 comparison against an
+  official list.
+- **SumatraPDF is a GUI-subsystem executable, not a console app.**
+  `$LASTEXITCODE` after invoking it via the `&` call operator is
+  unreliable and was the cause of a false-negative bug found during 7.1
+  verification (script reported failure on a successful print). Use
+  `Start-Process -Wait -PassThru` and read `.ExitCode` from the returned
+  process object instead.
+- **`Start-Process -ArgumentList` does not auto-quote array elements
+  containing spaces** the way the `&` call operator does. A printer name
+  like `"Brother HL-L2320D series"` passed unquoted gets split across
+  multiple arguments by the resulting command line, causing SumatraPDF to
+  silently print to the wrong (default) printer instead of failing
+  loudly. Every argument that may contain spaces (printer name, file
+  path, and later the composed `-print-settings` string) must be
+  individually wrapped in quotes in code before being added to the
+  `-ArgumentList` array — do not rely on PowerShell to do this
+  automatically.
 
 ### Service contract
 
-- `PrintService.print(jobId: string): Promise<'COMPLETED' | 'PRINT_FAILED'>`
-  is the entire public surface. No other method returns a raw
+- `PrintService.print(jobId: string, options?: PrintOptions): Promise<'COMPLETED' | 'PRINT_FAILED'>`. No other method returns a raw
   shell/process result to the caller.
 - Validate the final file exists on disk (not just that `finalFile` is set
   in job state) before invoking `print.ps1`.
 - Invoke the printer via a fixed, configured script path and a fixed
-  printer name (`"Brother HL-L2320D series"`, or the exact Windows printer queue
-  name — verify against `Get-Printer` on the target host, it may differ
-  slightly from the model name) read from environment/config — **never
-  interpolate the job ID, file path, or any request field directly into a
-  shell command string.** Pass values as separate process arguments
-  (`spawn`, not `exec`/string concatenation), so there is no
-  shell-injection surface even though inputs are server-generated today.
+  printer name (`"Brother HL-L2320D series"` — the verified queue name,
+  not the model name) read from environment/config — **never interpolate
+  the job ID, file path, or any request field directly into a shell
+  command string.** Pass values as separate process arguments, quoted
+  individually per the `Start-Process` note above.
 - On any failure (script exit code, timeout, missing file, missing
   printer), return `PRINT_FAILED` and keep the job's `finalFile`
-  untouched — printing never deletes or moves the source PDF.
+  untouched.
 - Log the attempt (job ID, timestamp, printer, outcome) without logging
-  full file system paths beyond what's needed to debug — consistent with
-  the Phase 9 credential/diagnostics-redaction rule already in the plan.
+  full file system paths beyond what's needed to debug.
+
+### Configurable print options (additive)
+
+```ts
+interface PrintOptions {
+  copies?: number;                          // 1-20, default 2
+  pageRange?: string;                       // Sumatra range syntax, default: all pages
+  paperSize?: 'A4' | 'Letter' | 'A5';       // default 'A5'
+  layout?: 'portrait' | 'landscape';        // default 'portrait'
+  fitMode?: 'fit' | 'noscale' | 'shrink';   // default 'fit'
+}
+```
+
+- Stored on the job record alongside `autoPrint` (declared at job
+  creation, since an auto-printed job has no manual Print click at which
+  to collect these). The explicit `POST .../print` endpoint may accept an
+  optional `printOptions` body to override just that call; otherwise it
+  falls back to the job's stored value, then to the defaults above.
+- **Every field is validated against a fixed allow-list/range** before
+  being composed into the `-print-settings` string
+  (`${copies}x,${pageRange},paper=${paperSize},${layout},${fitMode},simplex`).
+  The client never supplies a raw `-print-settings` string. Invalid values
+  are rejected outright, never silently clamped or dropped.
+- **No arbitrary percentage scaling is possible.** SumatraPDF's print CLI
+  only supports the three discrete `fitMode` values; `-zoom <percent>`
+  affects only the interactive viewer, not `-print-to`. Do not design a
+  UI control that implies free-form scale percentage — it cannot be
+  honored by the underlying tool.
+- UI for these options is Phase 7.2/7.3 scope, not this section.
 
 ---
 

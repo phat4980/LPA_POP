@@ -1,4 +1,3 @@
-
 # LPA POP - PO Automation Implementation Plan
 
 > This plan is based on the repository as it exists on 2026-08-23. It is incremental: preserve the working Python PO tool first, then add Circle K automation around it.
@@ -415,20 +414,65 @@ New backend surface required (not yet built, see Phase 6 note on
 
 ### Printer configuration (confirmed)
 
-- Target printer: **Brother HL-L2320D series**, monochrome laser, **USB-only**
-  (no network/WiFi interface). This means the automation service must run
-  on the same Windows host the printer is physically connected to; remote
-  printing across machines is not supported by this hardware.
+- Target printer: **Brother HL-L2321D** (Windows driver/queue name confirmed
+  during 7.1 verification: **"Brother HL-L2320D series"** — the driver is
+  shared across the HL-L2320D/L2321D family; always verify via
+  `Get-Printer` on a new host rather than trusting the model name).
+  Monochrome laser, **USB-only** (no network/WiFi interface). This means
+  the automation service must run on the same Windows host the printer is
+  physically connected to; remote printing across machines is not
+  supported by this hardware.
 - Default print mode: **simplex (1 mặt)**. The printer supports automatic
   duplex, but PO output defaults to one-sided; duplex is not enabled by
   default.
 - Print mechanism: Windows/PowerShell has no reliable built-in way to
   print a PDF to a named printer silently with a clean exit code.
   `scripts/print.ps1` uses **SumatraPDF (portable)** as the actual print
-  invoker (`SumatraPDF.exe -print-to "<printer name>" -print-settings "simplex" -silent <file>`), vendored as a small binary under `scripts/`.
-  This is the one new binary dependency introduced by this phase; it is
-  not a build tool and does not affect `web/` or `apps/automation`'s
-  npm dependency tree.
+  invoker, vendored as a small binary under `scripts/vendor/`. SumatraPDF
+  is a GUI-subsystem executable, so the script uses `Start-Process -Wait -PassThru` and reads `.ExitCode` from the returned process object —
+  `$LASTEXITCODE` after the `&` call operator is unreliable for this class
+  of executable and was the root cause of a false-negative bug found
+  during 7.1 verification (fixed). Printer names and file paths passed to
+  `Start-Process -ArgumentList` must be individually quoted in code —
+  unlike the `&` operator, `-ArgumentList` does not auto-quote array
+  elements containing spaces, which caused an early failure to route to
+  the correct printer.
+
+### Configurable print options (additive, confirmed)
+
+Beyond simplex/duplex, the following are configurable per job via an
+additive `printOptions` field, stored on the job record alongside
+`autoPrint`:
+
+```text
+copies: number       (1-20, default 2)
+pageRange: string    (Sumatra range syntax, e.g. "1-3,5"; default: all pages)
+paperSize: 'A4' | 'Letter' | 'A5'   (default 'A5')
+layout: 'portrait' | 'landscape'    (default 'portrait')
+fitMode: 'fit' | 'noscale' | 'shrink'   (default 'fit')
+```
+
+Notes:
+
+- **No arbitrary percentage scaling.** SumatraPDF's print CLI only
+  supports the three discrete `fitMode` values above; `-zoom <percent>`
+  only affects the on-screen viewer, not `-print-to`. Do not expose a
+  free-form scale percentage in the UI later — it cannot be honored.
+- `printOptions` is declared at job creation time, alongside `autoPrint`,
+  since an auto-printed job has no manual "click Print" step at which to
+  collect these values. The explicit `POST .../print` endpoint may accept
+  an optional `printOptions` body to override the job's stored values for
+  that one print call; if omitted, it falls back to the job's stored
+  `printOptions`, then to the defaults above.
+- All fields are server-validated against a fixed allow-list/range before
+  being composed into SumatraPDF's `-print-settings` string
+  (`${copies}x,${pageRange},paper=${paperSize},${layout},${fitMode},simplex`).
+  The client never supplies a raw `-print-settings` string directly —
+  every value is validated individually first. Invalid values are
+  rejected (400), not silently clamped or ignored.
+- UI for these options is deferred to Phase 7.2/7.3; placement (e.g. a
+  collapsed "Print options" section, off by default) is decided when the
+  dashboard UI is built, not at this stage.
 
 ### Required non-technical workflow
 
