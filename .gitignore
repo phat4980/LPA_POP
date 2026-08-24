@@ -113,3 +113,6 @@ docs/_build/
 # Backup files
 *.orig
 *.rej
+
+#Image
+*.png
