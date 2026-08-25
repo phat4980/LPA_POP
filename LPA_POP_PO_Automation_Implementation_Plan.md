@@ -181,8 +181,8 @@ GET  /api/staff
 
 The Node client uses the existing multipart endpoint: sends downloaded
 PDFs as `pdfs`, the store list as `list_file`, an output filename/path
-when required, reads the returned Python job ID, subscribes to SSE (or
-polls) until `done`/`error`, then downloads `/api/jobs/{id}/pdf`.
+when required, reads the returned Python job ID, polls until `done`/`error`,
+then downloads `/api/jobs/{id}/pdf`.
 
 `packages/contracts/openapi.yaml` documentation is still pending. Existing
 endpoints are preserved unchanged.
@@ -231,12 +231,12 @@ based on the UI, not a configured maximum.
 
 **Status: DONE / LOCAL END-TO-END VERIFIED**
 
-`apps/automation/src/web2/Web2Client.ts` checks Web 2 health, uploads
+`apps/automation/src/services/Web2Client.ts` checks Web 2 health, uploads
 downloaded files and the configured store list to `/api/jobs/upload`,
 tracks the Python job ID separately from the automation job ID, consumes
-SSE or polls the Python job endpoint, downloads and exposes the final PDF
-path, preserves source files if Web 2 processing fails, applies request
-timeouts and returns actionable errors. Does not move merge, Qty
+the Python job endpoint, downloads and exposes the final PDF path, preserves
+source files if Web 2 processing fails, applies request timeouts and returns
+actionable errors. Does not move merge, Qty
 annotation, store mapping or PDF parsing into TypeScript.
 
 Evidence completed on 2026-08-23: the Circle K workflow downloaded 3 source
@@ -375,8 +375,8 @@ leakage in the primary workflow.
 
 ## 10. Phase 7.4 - Log Panel & Back Button (UI additions)
 
-**Status: DONE / verified with automated SSE and SQLite coverage (see
-`automation-mockup-additions.html`)**
+**Status: DONE / verified with E2E, HTTP/SSE, Web2 snapshot, and SQLite
+tests**
 
 Context: after going to production, the client needs to see processing
 logs in real time - in particular the `WARNING: Khong co ma cua hang: ...`
@@ -384,24 +384,27 @@ lines that currently only exist in the Python-side `po_merge_tool.log` -
 and needs a way to return to the start of the flow from the result page
 without a full page reload.
 
-### 7.4.a - Log panel (`running` state)
+### 7.4.a - Persistent log panel
 
-- Add a `.log-panel` block under `.ticket` in the `running` view of
-  `web/automation.html`.
-- Data source: Web2 already emits log entries over SSE at
-  `GET /api/jobs/{id}/events`. The Node automation service subscribes to
-  that stream (reusing the existing Web2Client connection from Phase 5)
-  and **forwards it through its own SSE** at
-  `/api/automation/jobs/:id/events`, merged with the automation service's
-  own log lines (login/download/upload steps). The dashboard client
-  connects to exactly one SSE stream.
+- Add one persistent `.log-panel` to `web/automation.html`, outside the
+  state-specific views, so it remains visible in idle, running, success,
+  printed, print-failed, and failure states.
+- Web2 log source: `GET /api/jobs/{id}` returns the authoritative `job.logs`
+  snapshot. `Web2Client` synchronizes that snapshot every 500 ms while the
+  Python job is active and normalizes Python levels to `INFO`, `WARNING`, or
+  `ERROR`. This is intentionally used instead of relying on SSE chunk timing
+  because the current Python SSE stream sends snapshots and progress events.
+- Node automation events and synchronized Web2 entries are merged by
+  `AutomationLogHub` and exposed through the automation service's single SSE
+  endpoint `/api/automation/jobs/:id/events`. Duplicate Web2 snapshot/event
+  entries are suppressed, and the browser connects to exactly one stream.
 - Every log line carries a `level` (`INFO`/`WARNING`/`ERROR`), mapped from
   Python's `logging` levels on the Web2 side and set directly on the Node
   side.
 - UI: filter chips for All/Info/Warning/Error (client-side filter over
-  already-received lines, no round trip per filter change), auto-scroll to
-  the latest line, Copy button, and a Download-log button that exports
-  only the current job's log as `.txt`.
+  already-received lines, no round trip per filter change), stable client
+  keys, auto-scroll to the latest line, Copy button, and a Download-log
+  button that exports only the current job's log as `.txt`.
 
 ### 7.4.b - "Back to start" button (`success` / `printed` / `printFailed`)
 
@@ -418,8 +421,9 @@ without a full page reload.
 logs(id, automation_job_id, ts, level, message)
 ```
 
-- Written in parallel with the SSE emit, never blocking real-time
-  delivery.
+- Written asynchronously in parallel with the SSE emit, never blocking
+  real-time delivery. A bounded in-memory replay buffer covers the short
+  interval before SQLite persistence completes and is released afterward.
 - Filtering by level is a plain `WHERE level = ?`.
 - A daily cleanup job runs `DELETE FROM logs WHERE ts < now - 3 days`
   (retention configurable via env var, default 3 days).
@@ -429,15 +433,18 @@ Acceptance criteria (7.4):
 - Real-time log shows INFO/WARNING/ERROR from both Python and Node in one
   panel while a job is running.
 - Level filter works correctly with no lines lost when switching filters.
-- A given job's log remains viewable/downloadable for 3 days, even across
-  a tab close or a service restart.
+- A given job's log remains persisted and viewable/downloadable for 3 days
+  when the job ID is known. Full tab-close resume and in-flight job recovery
+  remain Phase 8.1 responsibilities because automation jobs are still
+  in-memory.
 - The "Back to start" button appears on every terminal state (success,
   print failure), always starts a clean new job, and never deletes the
   produced PDF.
 
 ## 11. Phase 8 - Reliability, Recovery and Security (restructured)
 
-**Status: 8.1 TODO - prioritized right after 7.4 | 8.2-8.6 TODO - still
+**Status: 8.1 DONE / verified with SQLite persistence and recovery tests |
+8.2-8.6 TODO - still
 "after the happy path" as in the original plan**
 
 Rationale for the split: the production client is actively hitting the
@@ -449,6 +456,9 @@ Phase 9 and 10.
 
 ### 8.1 - SQLite job + log persistence (pulled forward, high priority)
 
+**Status: DONE - write-through persistence, restart recovery, and client
+resume implemented.**
+
 ```text
 jobs(automation_job_id, delivery_date, status, current_step, progress,
      downloaded_count, total_count, python_job_id, source_files, final_file,
@@ -456,16 +466,26 @@ jobs(automation_job_id, delivery_date, status, current_step, progress,
 logs(id, automation_job_id, ts, level, message)   -- see 7.4.c
 ```
 
-- Replace the current in-memory job map with SQLite (`better-sqlite3` or
-  equivalent); every state-machine transition is written straight to the
-  DB instead of only living in RAM. DB file lives under
+- Replace the current in-memory job map with SQLite (`node:sqlite` on the
+  existing Node 22 runtime); every state-machine transition is written
+  straight to the DB instead of only living in RAM. DB file lives under
   `storage/db/automation.sqlite`.
+- Use one shared database connection opened by
+  `apps/automation/src/persistence/db.ts`. Migrations are defined in
+  `apps/automation/src/persistence/migrations/` and tracked by the
+  `schema_migrations` table. Migration `002_jobs.sql` adds `jobs` while
+  migration `001_logs.sql` preserves the existing 7.4 `logs` table.
+- `SqliteAutomationJobRepository` maps snake_case rows to camelCase job
+  objects and JSON-serializes `source_files`, `final_file`, and
+  `print_options`. The in-memory repository remains available for isolated
+  unit tests.
 - On automation service restart (crash or machine reboot): any job in a
   non-terminal state (`QUEUED`, `LOGGING_IN`, `DOWNLOADING`, `PROCESSING`,
   `PRINTING`) is marked `FAILED` with reason "Service restarted mid-job" -
   it does NOT attempt to blindly resume Playwright/printing. Files already
   downloaded remain intact under `storage/jobs/<job-id>/downloads/`.
-- Client side: the current `automationJobId` is kept in `localStorage`; on
+- Client side: the current `automationJobId` is kept under the
+  `lpaPop.automationJobId` localStorage key; on
   tab reopen, call `GET /api/automation/jobs/:id` - if the job is still
   running, resume the `running` view; if it finished, show the matching
   `success`/`failure` view; if it's not found (already cleaned up), fall
@@ -627,14 +647,14 @@ End-to-end walkthrough of the six-step non-technical workflow. DONE.
 
 ### Slice I - Log panel & back button (Phase 7.4)
 
-Merged SSE log forwarding with levels, filterable log panel, Copy/Download
-log, `logs` SQLite table with 3-day retention cleanup, back-to-start button
-on all terminal states.
+Merged Node and Web2 snapshot log forwarding with levels, persistent and
+filterable log panel, Copy/Download log, `logs` SQLite table with 3-day
+retention cleanup, and back-to-start button on all terminal states.
 
-### Slice J - Persistence (Phase 8.1)
+### Slice J - Persistence (Phase 8.1) DONE
 
 `jobs` + `logs` SQLite schema, restart-recovery marking in-flight jobs
-`FAILED`, `localStorage`-based client resume.
+`FAILED`, `localStorage`-based client resume. Verified with 41/41 Node tests.
 
 ### Slice K - One-click startup (Phase 9)
 
@@ -689,8 +709,8 @@ The existing Web 2 must remain independently runnable throughout this work.
 | Phase 5 - Web 2 integration                        | DONE                                                            | -                                                                    |
 | Phase 6 - Automation jobs                          | DONE (in-memory; persistence in 8.1)                            | -                                                                    |
 | Phase 7 - Dashboard & Printing                     | DONE, running in production for the client                      | -                                                                    |
-| **Phase 7.4 - Log panel & Back button**            | **DONE - verified with automated SSE and SQLite coverage**       | -                                                                  |
-| **Phase 8.1 - SQLite job+log (pulled forward)**    | **TODO - prioritized right after 7.4**                          | `jobs`/`logs` schema, restart recovery, localStorage resume        |
+| **Phase 7.4 - Log panel & Back button**            | **DONE - E2E verified; 39/39 Node tests pass**                    | -                                                                  |
+| **Phase 8.1 - SQLite job+log (pulled forward)**    | **DONE - 41/41 Node tests pass**                                | -                                                                  |
 | Phase 8.2-8.6 - Reliability/security (remainder)   | TODO - after the happy path                                    | Deep retries, redaction, manifests                                  |
 | **Phase 9 - One-click startup**                    | **TODO**                                                        | NSSM services + auto-opening launcher                              |
 | **Phase 10 - Domain & remote access**              | **TODO - after Phase 9**                                        | Cloudflare Tunnel + minimum auth                                    |

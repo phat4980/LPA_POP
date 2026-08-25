@@ -1,6 +1,7 @@
 const TERMINAL_STATES = ["FINAL_READY", "COMPLETED", "FAILED", "PRINT_FAILED"];
 const STATUS_LABELS = { QUEUED: "Đang xếp hàng", LOGGING_IN: "Đang kết nối", DOWNLOADING: "Đang tải phiếu đặt hàng", PROCESSING: "Đang xử lý dữ liệu", FINAL_READY: "PDF đã sẵn sàng", PRINTING: "Đang in", COMPLETED: "Đã in xong", FAILED: "Không thể hoàn tất", PRINT_FAILED: "In thất bại" };
 const ERROR_LABELS = { FAILED: "Không thể hoàn tất quy trình. Bạn có thể thử lại.", PRINT_FAILED: "Không thể in file PDF. File vẫn được giữ lại để thử lại." };
+const AUTOMATION_JOB_STORAGE_KEY = "lpaPop.automationJobId";
 
 function automationDashboard() {
   return {
@@ -11,13 +12,25 @@ function automationDashboard() {
     get statusLabel() { return STATUS_LABELS[this.job?.status] || "Đang xử lý"; },
     get downloadUrl() { return this.job ? `${AUTOMATION_API_BASE}/api/automation/jobs/${encodeURIComponent(this.job.automationJobId)}/download` : "#"; },
     get visibleLogs() { return this.logFilter === "ALL" ? this.logs : this.logs.filter((entry) => entry.level === this.logFilter); },
-    init() { this.clearPolling(); },
+    async init() {
+      this.clearPolling();
+      const savedJobId = localStorage.getItem(AUTOMATION_JOB_STORAGE_KEY);
+      if (!savedJobId) return;
+      try {
+        this.job = await getJob(savedJobId);
+        this.connectLogs();
+        if (this.isRunning) this.startPolling();
+        else this.updateView();
+      } catch (error) {
+        if (error?.code === "HTTP_404") localStorage.removeItem(AUTOMATION_JOB_STORAGE_KEY);
+      }
+    },
     options() { return { copies: this.copies, ...(this.pageRange.trim() ? { pageRange: this.pageRange.trim() } : {}), paperSize: this.paperSize, layout: this.layout, fitMode: this.fitMode }; },
     async execute() {
       if (this.isRunning) return;
       this.clearPolling(); this.closeLogs(); this.logs = []; this.logSequence = 0; this.logFilter = "ALL"; this.errorMessage = null; this.job = null;
       if (!this.deliveryDate) { this.errorMessage = "Vui lòng chọn ngày giao hàng."; return; }
-      try { this.job = await startJob(this.deliveryDate, this.autoPrint, this.options()); this.view = "running"; this.connectLogs(); this.startPolling(); }
+      try { this.job = await startJob(this.deliveryDate, this.autoPrint, this.options()); localStorage.setItem(AUTOMATION_JOB_STORAGE_KEY, this.job.automationJobId); this.view = "running"; this.connectLogs(); this.startPolling(); }
       catch (error) { this.errorMessage = "Không thể bắt đầu quy trình. Vui lòng thử lại."; this.view = "idle"; }
     },
     startPolling() { this.clearPolling(); this.pollFailures = 0; this.polling = setInterval(() => this.poll(), 1800); this.poll(); },
@@ -52,7 +65,7 @@ function automationDashboard() {
       catch (error) { this.errorMessage = "Không thể in file PDF. Vui lòng thử lại."; this.view = "printFailed"; }
       finally { this.isPrinting = false; }
     },
-    resetForRetry() { this.clearPolling(); this.closeLogs(); this.logs = []; this.logSequence = 0; this.logFilter = "ALL"; this.job = null; this.errorMessage = null; this.view = "idle"; },
+    resetForRetry() { this.clearPolling(); this.closeLogs(); localStorage.removeItem(AUTOMATION_JOB_STORAGE_KEY); this.logs = []; this.logSequence = 0; this.logFilter = "ALL"; this.job = null; this.errorMessage = null; this.view = "idle"; },
     async copyLog() { await navigator.clipboard?.writeText(this.visibleLogs.map((entry) => `${entry.ts} ${entry.level}: ${entry.message}`).join("\n")); },
     downloadLog() { const blob = new Blob([this.visibleLogs.map((entry) => `${entry.ts} ${entry.level}: ${entry.message}`).join("\n")], { type: "text/plain;charset=utf-8" }); const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = `${this.job?.automationJobId || "automation-job"}.txt`; link.click(); URL.revokeObjectURL(link.href); },
     clearPolling() { if (this.polling !== null) { clearInterval(this.polling); this.polling = null; } },
