@@ -5,16 +5,17 @@ import { constants, createReadStream } from "node:fs";
 import { basename } from "node:path";
 import type { AutomationJobService } from "../jobs/AutomationJobService.js";
 import { validatePrintOptions } from "../printing/PrintService.js";
+import type { AutomationLogHub } from "../logging/AutomationLogHub.js";
 
-export function createAutomationJobHttpServer(service: AutomationJobService, options: { allowedOrigins?: readonly string[] } = {}): Server {
+export function createAutomationJobHttpServer(service: AutomationJobService, options: { allowedOrigins?: readonly string[]; logHub?: AutomationLogHub } = {}): Server {
   const allowedOrigins = new Set(options.allowedOrigins ?? ["http://127.0.0.1:8088", "http://localhost:8088"]);
   return createServer(async (request, response) => {
-    try { await route(request, response, service, allowedOrigins); }
+    try { await route(request, response, service, allowedOrigins, options.logHub); }
     catch { respond(response, 500, { error: "Internal server error" }); }
   });
 }
 
-async function route(request: IncomingMessage, response: ServerResponse, service: AutomationJobService, allowedOrigins: ReadonlySet<string>): Promise<void> {
+async function route(request: IncomingMessage, response: ServerResponse, service: AutomationJobService, allowedOrigins: ReadonlySet<string>, logHub?: AutomationLogHub): Promise<void> {
   const url = new URL(request.url ?? "/", "http://localhost");
   if (url.pathname.startsWith("/api/automation/")) {
     const origin = request.headers.origin;
@@ -69,7 +70,15 @@ async function route(request: IncomingMessage, response: ServerResponse, service
   if (!match || request.method !== "GET") return respond(response, 404, { error: "Not found" });
   const id = decodeURIComponent(match[1]);
   const job = service.getJob(id);
-  if (!job) return respond(response, 404, { error: "Job not found" });
+  if (!job && !(match[2] === "events" && request.headers.accept?.includes("text/event-stream") && logHub?.list(id).length)) return respond(response, 404, { error: "Job not found" });
+  if (match[2] === "events" && request.headers.accept?.includes("text/event-stream") && logHub) {
+    response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
+    const write = (entry: unknown) => response.write(`event: log\ndata: ${JSON.stringify({ type: "log", entry })}\n\n`);
+    for (const entry of logHub.list(id)) write(entry);
+    const unsubscribe = logHub.subscribe(id, write);
+    request.once("close", () => { unsubscribe(); response.end(); });
+    return;
+  }
   if (match[2] === "events") return respond(response, 200, service.getJobEvents(id) ?? []);
   if (match[2] === "files") return respond(response, 200, { sourceFiles: job.sourceFiles, finalFile: job.finalFile });
   return respond(response, 200, job);

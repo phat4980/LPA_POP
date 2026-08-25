@@ -13,6 +13,8 @@ export type AutomationConfig = {
   printerName: string;
   printScriptPath: string;
   printTimeoutMs?: number;
+  automationDatabasePath?: string;
+  logRetentionDays?: number;
   allowedOrigins?: string[];
 };
 
@@ -30,6 +32,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AutomationConf
     printerName: env.PRINTER_NAME ?? "Brother HL-L2320D series",
     printScriptPath: env.PRINT_SCRIPT_PATH ?? "../../scripts/print.ps1",
     printTimeoutMs: Number(env.PRINT_TIMEOUT_MS ?? 90_000),
+    automationDatabasePath: env.AUTOMATION_DATABASE_PATH ?? "automation.sqlite",
+    logRetentionDays: Number(env.LOG_RETENTION_DAYS ?? 3),
     allowedOrigins: (env.AUTOMATION_ALLOWED_ORIGINS ?? "http://127.0.0.1:8088,http://localhost:8088")
       .split(",").map((origin) => origin.trim()).filter(Boolean),
   };

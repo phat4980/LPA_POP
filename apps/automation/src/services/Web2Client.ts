@@ -11,7 +11,9 @@ export type Web2Job = {
   status: "queued" | "running" | "done" | "error";
   output_path?: string;
   error?: string | null;
+  logs?: Array<{ time?: string; level?: string; message?: string }>;
 };
+export type Web2LogEntry = { ts: string; level: "INFO" | "WARNING" | "ERROR"; message: string };
 
 export type Web2FinalArtifact = {
   filePath: string;
@@ -79,6 +81,45 @@ export class Web2Client {
       fileName: basename(outputPath),
       sizeBytes: fileStats.size,
     };
+  }
+
+  subscribeToJobEvents(jobId: string, onLog: (entry: Web2LogEntry) => void): () => void {
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const snapshotResponse = await this.request(`/api/jobs/${encodeURIComponent(jobId)}`);
+        const snapshot = await this.parseJson<Web2Job>(snapshotResponse);
+        for (const entry of snapshot.logs ?? []) {
+          if (!entry.message) continue;
+          const level = entry.level === "ERROR" ? "ERROR" : entry.level === "WARNING" || entry.level === "WARN" ? "WARNING" : "INFO";
+          onLog({ ts: entry.time ?? new Date().toISOString(), level, message: entry.message });
+        }
+        const response = await fetch(`${this.options.baseUrl}/api/jobs/${encodeURIComponent(jobId)}/events`, { signal: controller.signal, headers: { Accept: "text/event-stream" } });
+        if (!response.ok || !response.body) return;
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (!controller.signal.aborted) {
+          const chunk = await reader.read();
+          if (chunk.done) break;
+          buffer += decoder.decode(chunk.value, { stream: true });
+          const events = buffer.split(/\r?\n\r?\n/);
+          buffer = events.pop() ?? "";
+          for (const event of events) {
+            const data = event.split(/\r?\n/).find((line) => line.startsWith("data:"))?.slice(5).trim();
+            if (!data) continue;
+            try {
+              const parsed = JSON.parse(data) as { entry?: { time?: string; level?: string; message?: string } };
+              const entry = parsed.entry;
+              if (!entry?.message) continue;
+              const level = entry.level === "ERROR" ? "ERROR" : entry.level === "WARNING" || entry.level === "WARN" ? "WARNING" : "INFO";
+              onLog({ ts: entry.time ?? new Date().toISOString(), level, message: entry.message });
+            } catch { /* Ignore malformed SSE records. */ }
+          }
+        }
+      } catch { /* A log stream must never fail the automation job. */ }
+    })();
+    return () => controller.abort();
   }
 
   private async request(path: string, init?: RequestInit): Promise<Response> {

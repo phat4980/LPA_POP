@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import type { Server } from "node:http";
-import { resolve } from "node:path";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { createAutomationJobHttpServer } from "./AutomationJobHttpServer.js";
 import { AutomationJobStatus } from "../jobs/AutomationJob.js";
 import { AutomationJobService } from "../jobs/AutomationJobService.js";
 import { FakeAutomationWorkflow } from "../jobs/FakeAutomationWorkflow.js";
 import { InMemoryAutomationJobRepository } from "../jobs/InMemoryAutomationJobRepository.js";
+import { AutomationLogHub } from "../logging/AutomationLogHub.js";
+import { LogStore } from "../logging/LogStore.js";
 
 async function withServer(run: (baseUrl: string, service: AutomationJobService, repository: InMemoryAutomationJobRepository) => Promise<void>, printOutcome: "COMPLETED" | "PRINT_FAILED" = "COMPLETED"): Promise<void> {
   const repository = new InMemoryAutomationJobRepository();
@@ -68,6 +72,31 @@ test("applies explicit CORS to automation GET and preflight requests only", asyn
   const nonAutomation = await fetch(`${baseUrl}/other`, { headers: { Origin: allowedOrigin } });
   assert.equal(nonAutomation.headers.has("access-control-allow-origin"), false);
 }));
+
+test("streams persisted automation logs as SSE", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "lpa-sse-"));
+  const repository = new InMemoryAutomationJobRepository();
+  const service = new AutomationJobService(repository, new FakeAutomationWorkflow());
+  const logStore = new LogStore(join(directory, "automation.sqlite"));
+  const logHub = new AutomationLogHub(logStore);
+  const server = createAutomationJobHttpServer(service, { logHub });
+  await listen(server);
+  const address = server.address();
+  assert.ok(address && typeof address !== "string");
+  const job = service.createJob({ automationJobId: "log-job", deliveryDate: "2026-08-24" });
+  logHub.publish(job.automationJobId, "WARNING", "Missing store code");
+  await new Promise<void>((resolvePromise) => queueMicrotask(resolvePromise));
+  const controller = new AbortController();
+  try {
+    const response = await fetch(`http://127.0.0.1:${address.port}/api/automation/jobs/log-job/events`, { headers: { Accept: "text/event-stream" }, signal: controller.signal });
+    assert.equal(response.status, 200);
+    const chunk = await response.body?.getReader().read();
+    assert.ok(chunk?.value);
+    assert.match(new TextDecoder().decode(chunk.value), /WARNING/);
+    controller.abort();
+    await close(server); logStore.close(); await rm(directory, { recursive: true, force: true });
+  }
+});
 
 test("downloads final PDF bytes and hides missing-file paths", async () => withServer(async (baseUrl, service, repository) => {
   const fixturePath = resolve(process.cwd(), "../../scripts/vendor/test-fixture.pdf");

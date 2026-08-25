@@ -11,6 +11,7 @@ import type { AutomationJobEventType } from "./AutomationJobEvent.js";
 import type { AutomationJobEvent } from "./AutomationJobEvent.js";
 import { logJobEvent, type JobLogSink } from "./JobLogger.js";
 import { validatePrintOptions, type PrintOptions, type PrintOutcome } from "../printing/PrintService.js";
+import type { LogEntry } from "../logging/LogStore.js";
 
 export interface AutomationPrintService { print(jobId: string, options?: PrintOptions): Promise<PrintOutcome>; }
 
@@ -27,6 +28,7 @@ export class AutomationJobService {
     private readonly workflow: AutomationWorkflow,
     private readonly logSink?: JobLogSink,
     private readonly printService?: AutomationPrintService,
+    private readonly logEntrySink?: (entry: LogEntry) => void,
   ) {}
 
   createJob(input: CreateAutomationJobInput): AutomationJob {
@@ -132,5 +134,6 @@ export class AutomationJobService {
   private event(job: AutomationJob, type: AutomationJobEventType, message?: string): void {
     const event = this.repository.addEvent({ automationJobId: job.automationJobId, type, timestamp: new Date().toISOString(), message });
     logJobEvent(event, this.logSink);
+    this.logEntrySink?.({ automationJobId: job.automationJobId, ts: event.timestamp, level: type === "JOB_FAILED" || type === "PRINT_FAILED" ? "ERROR" : "INFO", message: message ? `${type}: ${message}` : type });
   }
 }
