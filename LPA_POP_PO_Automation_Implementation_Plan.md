@@ -1,3 +1,5 @@
+vây
+
 # LPA POP - PO Automation Implementation Plan
 
 > Updated 2026-08-25. Phase 7 is DONE and already in production for the
@@ -14,18 +16,18 @@ The repository is a Python application with a Node.js/TypeScript automation
 layer added around it.
 
 | Area                 | Current location                                       | Verified responsibility                                                     | Status                                      |
-| --------------------- | -------------------------------------------------------- | ------------------------------------------------------------------------------ | ---------------------------------------------- |
-| Desktop GUI          | `src/gui_modern.py`, `src/po_merge_tool_gui.py`        | CustomTkinter/Tk workflows, PDF selection, merge, dashboard/staff/settings   | Existing                                     |
-| Web UI               | `web/index.html`, `web/app.js`, `web/styles.css`      | Vanilla HTML/CSS/JS UI for the PO merge service                              | Existing                                     |
-| Web API              | `src/web_app.py`                                        | FastAPI app, upload/path jobs, settings, staff, PDF download, SSE events     | Existing                                     |
-| PO business logic    | `src/core.py`                                            | Read codes, extract PO pages, merge and annotate Qty                         | Existing; do not rewrite                     |
-| Web job worker       | `src/jobs.py`                                            | In-memory jobs with background threads and SSE                               | Existing; not persistent                     |
-| Configuration        | `src/config.py`                                          | `%APPDATA%\\LPA_POP` settings/jobs, app constants, port `8088`             | Existing                                     |
-| Python dependencies  | `requirements.txt`                                       | FastAPI, Uvicorn, PDF libraries, CustomTkinter and other installed packages  | Existing                                     |
-| Build artifacts      | `build/`, `dist/`, `__pycache__/`                     | Generated files                                                               | Do not use as source                         |
-| Sample/runtime files | `po/`, `output/`, `po_merge_tool.log`                | Local PDFs, output and logs                                                   | Treat as data/artifacts                      |
-| Tests                | `test/`                                                   | Existing test area; currently ignored by `.gitignore`                       | Needs cleanup before reliable test evidence  |
-| Node/TypeScript      | `apps/automation/`                                        | Automation service: Playwright, job orchestration, printing, dashboard glue  | Implemented through Phase 7                  |
+| -------------------- | ------------------------------------------------------ | --------------------------------------------------------------------------- | ------------------------------------------- |
+| Desktop GUI          | `src/gui_modern.py`, `src/po_merge_tool_gui.py`    | CustomTkinter/Tk workflows, PDF selection, merge, dashboard/staff/settings  | Existing                                    |
+| Web UI               | `web/index.html`, `web/app.js`, `web/styles.css` | Vanilla HTML/CSS/JS UI for the PO merge service                             | Existing                                    |
+| Web API              | `src/web_app.py`                                     | FastAPI app, upload/path jobs, settings, staff, PDF download, SSE events    | Existing                                    |
+| PO business logic    | `src/core.py`                                        | Read codes, extract PO pages, merge and annotate Qty                        | Existing; do not rewrite                    |
+| Web job worker       | `src/jobs.py`                                        | In-memory jobs with background threads and SSE                              | Existing; not persistent                    |
+| Configuration        | `src/config.py`                                      | `%APPDATA%\\LPA_POP` settings/jobs, app constants, port `8088`          | Existing                                    |
+| Python dependencies  | `requirements.txt`                                   | FastAPI, Uvicorn, PDF libraries, CustomTkinter and other installed packages | Existing                                    |
+| Build artifacts      | `build/`, `dist/`, `__pycache__/`                | Generated files                                                             | Do not use as source                        |
+| Sample/runtime files | `po/`, `output/`, `po_merge_tool.log`            | Local PDFs, output and logs                                                 | Treat as data/artifacts                     |
+| Tests                | `test/`                                              | Existing test area; currently ignored by`.gitignore`                      | Needs cleanup before reliable test evidence |
+| Node/TypeScript      | `apps/automation/`                                   | Automation service: Playwright, job orchestration, printing, dashboard glue | Implemented through Phase 7                 |
 
 ### Current commands
 
@@ -191,8 +193,7 @@ endpoints are preserved unchanged.
 
 **Status: DONE / VERIFIED AGAINST LIVE TEST ACCOUNT**
 
-Vertical slice: `Launch browser -> Login -> Open PO page -> Select one
-delivery date -> Download one page/file`.
+Vertical slice: `Launch browser -> Login -> Open PO page -> Select one delivery date -> Download one page/file`.
 
 Rules: Playwright Page Objects; selectors kept inside the Circle K module;
 prefer roles/labels/text/stable attributes; auto-waiting, no arbitrary
@@ -245,8 +246,7 @@ PDFs for 109 POs across 3 dynamically detected pages (50, 50, 9);
 `/api/jobs/upload`; the client waited for the Python job to reach `done`
 and downloaded the final merged PDF; the artifact was verified non-empty.
 
-Acceptance: `Circle K download all -> Web 2 upload job -> Web 2 merge/annotate
--> final PDF available`, proven against a local fixture before daily live use.
+Acceptance: `Circle K download all -> Web 2 upload job -> Web 2 merge/annotate -> final PDF available`, proven against a local fixture before daily live use.
 
 ## 8. Phase 6 - Automation Job Orchestration
 
@@ -261,9 +261,7 @@ FINAL_READY -> PRINTING -> COMPLETED
                          -> PRINT_FAILED
 ```
 
-Job data: `automationJobId, deliveryDate, status, currentStep, progress,
-downloadedCount, totalCount, pythonJobId, sourceFiles, finalFile, error,
-createdAt, startedAt, completedAt`, plus the additive `autoPrint` and
+Job data: `automationJobId, deliveryDate, status, currentStep, progress, downloadedCount, totalCount, pythonJobId, sourceFiles, finalFile, error, createdAt, startedAt, completedAt`, plus the additive `autoPrint` and
 `printOptions` fields delivered in Phase 7.1.
 
 Endpoints:
@@ -518,10 +516,10 @@ environment variables or an OS-backed secret mechanism - never committed
 
 ## 12. Phase 9 - One-Click Startup for End Users
 
-**Status: TODO**
+**Status: DONE - NSSM install, idempotency, crash restart, launcher, and
+reboot behavior verified on the target Windows machine.**
 
-Goal: the end user never manually runs `npm start` / `python
-src/web_app.py`, and doesn't need to know what Node or Python is.
+Goal: the end user never manually runs `npm start` / `python src/web_app.py`, and doesn't need to know what Node or Python is.
 
 - Both services (Python Web2, Node automation) run as background **NSSM**
   Windows services: auto-start with Windows, auto-restart on crash, no
@@ -535,6 +533,19 @@ src/web_app.py`, and doesn't need to know what Node or Python is.
   (localhost initially, the domain once Phase 10 lands).
 - `scripts/service-install.ps1` (new) registers both NSSM services;
   `scripts/launcher/` (new) holds the launcher source/build config.
+- Implementation uses `scripts/launcher/LPA-POP-Launcher.vbs` for a hidden
+  double-click entrypoint and `launch-dashboard.ps1` for service readiness.
+  The launcher reads `DASHBOARD_URL`, starts stopped services, polls Web2
+  health and the automation port for up to 30 seconds, and shows a simple
+  error message on timeout.
+- `service-install.ps1` derives paths from `$PSScriptRoot`, configures both
+  services for Automatic startup, hidden NSSM execution, crash restart, and
+  stdout/stderr logs under `storage/logs/`. It supports `-Uninstall` and
+  updates existing services idempotently.
+- Validation completed: fresh install, repeated install, process kill and
+  NSSM restart, launcher double-click, launcher reuse while services were
+  running, regression tests, and reboot with both services returning to
+  `Running` automatically.
 
 Acceptance criteria:
 
@@ -656,10 +667,11 @@ retention cleanup, and back-to-start button on all terminal states.
 `jobs` + `logs` SQLite schema, restart-recovery marking in-flight jobs
 `FAILED`, `localStorage`-based client resume. Verified with 41/41 Node tests.
 
-### Slice K - One-click startup (Phase 9)
+### Slice K - One-click startup (Phase 9) DONE
 
 NSSM service registration, auto-restart on crash, launcher that opens the
-dashboard automatically.
+dashboard automatically. Verified on the target Windows machine, including
+reboot startup recovery.
 
 ### Slice L - Domain & auth (Phase 10)
 
@@ -699,22 +711,22 @@ The existing Web 2 must remain independently runnable throughout this work.
 
 ## 17. Current Status Summary
 
-| Phase                                              | Status                                                        | Next evidence                                                    |
-| ---------------------------------------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------------- |
-| Phase 0 - Baseline                                 | DONE                                                            | -                                                                    |
-| Phase 1 - Repository preparation                   | DONE                                                            | -                                                                    |
-| Phase 2 - Existing Web 2/API                       | IMPLEMENTED; contract TODO                                     | OpenAPI document and compatibility check                            |
-| Phase 3 - Circle K one-page proof                  | DONE                                                            | -                                                                    |
-| Phase 4 - Pagination/downloads                     | DONE                                                            | -                                                                    |
-| Phase 5 - Web 2 integration                        | DONE                                                            | -                                                                    |
-| Phase 6 - Automation jobs                          | DONE (in-memory; persistence in 8.1)                            | -                                                                    |
-| Phase 7 - Dashboard & Printing                     | DONE, running in production for the client                      | -                                                                    |
-| **Phase 7.4 - Log panel & Back button**            | **DONE - E2E verified; 39/39 Node tests pass**                    | -                                                                  |
-| **Phase 8.1 - SQLite job+log (pulled forward)**    | **DONE - 41/41 Node tests pass**                                | -                                                                  |
-| Phase 8.2-8.6 - Reliability/security (remainder)   | TODO - after the happy path                                    | Deep retries, redaction, manifests                                  |
-| **Phase 9 - One-click startup**                    | **TODO**                                                        | NSSM services + auto-opening launcher                              |
-| **Phase 10 - Domain & remote access**              | **TODO - after Phase 9**                                        | Cloudflare Tunnel + minimum auth                                    |
-| Phase 11 - Testing                                 | TODO                                                             | Python, Node, Playwright and integration evidence                   |
+| Phase                                                 | Status                                                  | Next evidence                                     |
+| ----------------------------------------------------- | ------------------------------------------------------- | ------------------------------------------------- |
+| Phase 0 - Baseline                                    | DONE                                                    | -                                                 |
+| Phase 1 - Repository preparation                      | DONE                                                    | -                                                 |
+| Phase 2 - Existing Web 2/API                          | IMPLEMENTED; contract TODO                              | OpenAPI document and compatibility check          |
+| Phase 3 - Circle K one-page proof                     | DONE                                                    | -                                                 |
+| Phase 4 - Pagination/downloads                        | DONE                                                    | -                                                 |
+| Phase 5 - Web 2 integration                           | DONE                                                    | -                                                 |
+| Phase 6 - Automation jobs                             | DONE (in-memory; persistence in 8.1)                    | -                                                 |
+| Phase 7 - Dashboard & Printing                        | DONE, running in production for the client              | -                                                 |
+| **Phase 7.4 - Log panel & Back button**         | **DONE - E2E verified; 39/39 Node tests pass**    | -                                                 |
+| **Phase 8.1 - SQLite job+log (pulled forward)** | **DONE - 41/41 Node tests pass**                  | -                                                 |
+| Phase 8.2-8.6 - Reliability/security (remainder)      | TODO - after the happy path                             | Deep retries, redaction, manifests                |
+| **Phase 9 - One-click startup**                 | **DONE - install, launcher, and reboot verified** | -                                                 |
+| **Phase 10 - Domain & remote access**           | **TODO - after Phase 9**                          | Cloudflare Tunnel + minimum auth                  |
+| Phase 11 - Testing                                    | TODO                                                    | Python, Node, Playwright and integration evidence |
 
 ## Final Principle
 

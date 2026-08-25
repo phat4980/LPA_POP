@@ -239,12 +239,68 @@ service.
 4. Run `npm install` in `apps/automation`.
 5. Create `.env` from `apps/automation/.env.example` and use absolute paths
    for output, print script, and database where appropriate.
-6. Confirm the printer queue with `Get-Printer` and set the exact queue name
+6. The service installer automatically installs the Playwright browser into
+  a shared path for the Windows service account when it is missing. To
+  pre-install it manually, use:
+
+  ```powershell
+  $env:PLAYWRIGHT_BROWSERS_PATH = "$PWD\storage\playwright"
+  cd apps\automation
+  npx playwright install chromium
+  ```
+
+7. Confirm the printer queue with `Get-Printer` and set the exact queue name
    in `PRINTER_NAME`.
-7. Confirm Web2 health, a test PDF, and a test print before processing real
+8. Confirm Web2 health, a test PDF, and a test print before processing real
    POs.
 
-### 9.2 Production startup
+After these checks, install or update both Windows services:
+
+```powershell
+.\scripts\service-install.ps1
+```
+
+Create a desktop launcher with the application icon:
+
+```powershell
+.\scripts\launcher\create-desktop-shortcut.ps1
+```
+
+### 9.2 Desktop launcher flow
+
+Run the following one time in PowerShell from the repository root:
+
+```powershell
+.\scripts\launcher\create-desktop-shortcut.ps1
+```
+
+Expected output:
+
+```text
+Shortcut created: C:\Users\<user>\Desktop\LPA POP.lnk
+```
+
+Then:
+
+1. Open the Desktop.
+2. Double-click `LPA POP`.
+3. The launcher starts any stopped LPA POP service.
+4. It waits up to 30 seconds for Web2 and automation to be ready.
+5. It opens the URL configured by `DASHBOARD_URL`.
+
+The shortcut calls `wscript.exe` directly, so it does not depend on the
+`.vbs` file association and does not open a terminal window. The generated
+shortcut uses `assets/icon/app.ico`. To change the displayed name, pass a
+custom name when creating it:
+
+```powershell
+.\scripts\launcher\create-desktop-shortcut.ps1 -ShortcutName "LPA POP Automation"
+```
+
+If services are missing or do not become ready within 30 seconds, the
+launcher shows a simple error message. It does not open the dashboard early.
+
+### 9.3 Production startup
 
 Start Web2 first, then the automation service:
 
@@ -262,7 +318,7 @@ and an explicit remote-access design are in place. The application does not
 yet provide built-in authentication, automatic Windows service installation,
 or restart recovery for in-flight jobs.
 
-### 9.3 Production checklist
+### 9.4 Production checklist
 
 - Back up `storage/db/automation.sqlite` and required output directories.
 - Monitor `po_merge_tool.log` and the automation process output.
