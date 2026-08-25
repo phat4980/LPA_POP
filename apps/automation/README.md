@@ -7,6 +7,9 @@ This package is intentionally separate from the existing Python PO Management To
 - Circle K interaction belongs here.
 - PO parsing, merge and Qty annotation remain in the Python Web 2 under `src/`.
 - Cross-runtime communication uses HTTP and files.
+- Runtime logs are stored in `../../storage/db/automation.sqlite` by default
+	when the service is run from `apps/automation`; override this with
+	`AUTOMATION_DATABASE_PATH` when needed.
 
 ## Source layout (Page Object Model)
 

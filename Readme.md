@@ -1,193 +1,306 @@
-# PO Management Tool
+# LPA POP
 
-Công cụ hợp nhất các file PO PDF theo danh sách mã cửa hàng. Có **Web UI + REST API** (mặc định), GUI desktop, và CLI.
+LPA POP combines purchase-order (PO) PDF files by store code and annotates
+the merged output with quantities. It provides:
 
----
+- A Python Web2 service with a browser UI and REST/SSE API.
+- A Python desktop GUI and CLI for local PO processing.
+- A Node.js/TypeScript automation service for Circle K BizTrade, Web2
+  processing, PDF download, logging, and printing.
 
-## 1. Yêu cầu hệ thống
+The Python PO engine remains in `src/core.py`. The Node.js service calls it
+through the Web2 HTTP API; it does not duplicate the merge logic.
 
-- Python 3.10 trở lên (khuyến nghị)
+## 1. Architecture
+
+```text
+Browser
+  |
+  +--> Python Web2 UI/API       http://127.0.0.1:8088
+  |
+  +--> Node automation API      http://127.0.0.1:8090
+                                  |
+                                  +--> Circle K BizTrade via Playwright
+                                  +--> Python Web2 upload/process API
+                                  +--> PDF output and SumatraPDF printing
+                                  +--> storage/db/automation.sqlite
+```
+
+| Component          | Location                     | Responsibility                                |
+| ------------------ | ---------------------------- | --------------------------------------------- |
+| PO engine          | `src/core.py`              | Read, extract, merge, and annotate PO pages   |
+| Web2 API/UI        | `src/web_app.py`, `web/` | Upload/path jobs, progress, PDF download, SSE |
+| Desktop/CLI        | `src/po_merge_tool_gui.py` | Local GUI and command-line workflows          |
+| Automation service | `apps/automation/`         | Circle K workflow, job API, logs, printing    |
+| Print script       | `scripts/print.ps1`        | Invoke the configured Windows printer         |
+| Runtime artifacts  | `output/`, `storage/`    | PDFs, job data, and automation SQLite logs    |
+
+## 2. Requirements
+
 - Windows
-- Thư viện: xem `requirements.txt` (PyPDF2, pdfplumber, PyMuPDF, FastAPI, CustomTkinter, …)
+- Python 3.10 or newer
+- Node.js 22 or newer
+- npm 10 or newer
+- A configured Circle K BizTrade account for automation
+- The configured Brother printer and SumatraPDF files for printing
 
----
+## 3. Initial Setup
 
-## 2. Cài đặt
+Run these commands from the repository root in PowerShell.
 
-```sh
+### 3.1 Install Python dependencies
+
+```powershell
 python -m venv .venv
-.venv\Scripts\activate
+.venv\Scripts\Activate.ps1
+python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
----
+### 3.2 Install Node dependencies
 
-## 3. Chạy
-
-### a. Web UI (mặc định) — Approach C
-
-```sh
-python src/po_merge_tool_gui.py
-python src/web_app.py
+```powershell
+Push-Location apps\automation
+npm install
+Copy-Item .env.example .env
+Pop-Location
 ```
 
-Mở `http://127.0.0.1:8088` (bind localhost). Web 2 hiện có hai chế độ:
+Edit `apps/automation/.env` before starting automation. Set at least:
 
-- **Upload**: kéo thả PDF + CSV trên trình duyệt
-- **Đường dẫn máy**: trỏ folder/file trên disk — dùng cho automation
-
-Không mở browser:
-
-```sh
-python src/po_merge_tool_gui.py --web --no-browser
+```text
+CIRCLEK_BASE_URL=...
+CIRCLEK_USERNAME=...
+CIRCLEK_PASSWORD=...
+AUTOMATION_OUTPUT_DIR=../../output
+PRINTER_NAME=Brother HL-L2320D series
 ```
 
-### b. Desktop GUI (CustomTkinter)
+Keep `.env` out of source control. Do not commit passwords, browser state,
+production PDFs, or generated logs.
 
-```sh
-python src/po_merge_tool_gui.py --gui
+## 4. Run Locally
+
+Use two PowerShell terminals.
+
+### 4.1 Start the Python Web2 service
+
+From the repository root:
+
+```powershell
+.venv\Scripts\python.exe src\web_app.py
 ```
 
-### c. CLI
+Verify that `http://127.0.0.1:8088` opens in a browser.
 
-```sh
-python src/po_merge_tool_gui.py --input-folder ./pdfs --list-file stores.csv --output PO_FINAL.pdf
+### 4.2 Start the Node automation service
+
+From `apps/automation`:
+
+```powershell
+npm start
 ```
 
----
+Open the automation dashboard at:
+`http://127.0.0.1:8088/automation.html`
 
-## 4. API (automation)
+The automation API is available at `http://127.0.0.1:8090`.
 
-Server chỉ lắng nghe `127.0.0.1:8088`.
+## 5. Verify the Installation
 
-Tạo job bằng path trên máy (không upload):
+Run from `apps/automation`:
 
-```sh
-curl -X POST http://127.0.0.1:8088/api/jobs -H "Content-Type: application/json" -d "{\"pdf_folder\":\"D:/PO/inbox\",\"list_file\":\"D:/PO/MCH.csv\",\"output\":\"D:/PO/out/PO.pdf\"}"
+```powershell
+npm run build
+npm run test
 ```
 
-| Method | Path | Mô tả |
-|--------|------|--------|
-| POST | `/api/jobs` | Job path mode (JSON) |
-| POST | `/api/jobs/upload` | Job upload PDF + CSV |
-| GET | `/api/jobs/{id}` | Trạng thái + summary |
-| GET | `/api/jobs/{id}/events` | SSE progress |
-| GET | `/api/jobs/{id}/pdf` | Tải PDF kết quả |
-| GET/PUT | `/api/settings` | Default list / folder / output / regex |
-| GET | `/api/staff` | Tra cứu staff từ CSV |
+The tests cover job transitions, Web2 workflow integration, HTTP/SSE
+endpoints, printing behavior, log retention, and Circle K flow boundaries.
+Live Circle K and printer smoke tests require valid local configuration:
 
----
+```powershell
+npm run smoke:login
+npm run automation:circlek-po-inbox
+```
 
-## 5. Build EXE (desktop)
+Do not run live smoke tests against production data without an isolated
+delivery date and output directory.
 
-```sh
+## 6. Use the Application
+
+### 6.1 Automation dashboard
+
+1. Start Web2 and the automation service.
+2. Open `web/automation.html` through Web2.
+3. Select a delivery date and configure optional print settings.
+4. Click Execute once.
+5. Monitor progress and the merged INFO/WARNING/ERROR log stream.
+6. Download or preview the final PDF.
+7. Print explicitly, or enable auto-print before starting the job.
+
+The automation job state flow is:
+
+```text
+QUEUED -> LOGGING_IN -> DOWNLOADING -> PROCESSING -> FINAL_READY
+                                                     |
+                                                     +--> PRINTING -> COMPLETED
+                                                     +--> PRINT_FAILED
+```
+
+The final PDF remains available after a print failure. The log database
+keeps entries for the configured retention period, three days by default.
+
+### 6.2 Desktop GUI
+
+From the repository root:
+
+```powershell
+.venv\Scripts\python.exe src\po_merge_tool_gui.py --gui
+```
+
+### 6.3 CLI
+
+```powershell
+.venv\Scripts\python.exe src\po_merge_tool_gui.py `
+  --input-folder .\po `
+  --list-file .\MCH.csv `
+  --output .\output\PO_FINAL.pdf
+```
+
+The store list may be a TXT or CSV file. CSV columns support store code,
+store name, and staff mapping. The merge reports missing/extra store codes
+and writes the calculated quantity onto each output page.
+
+## 7. API Map
+
+### Python Web2 API (`8088`)
+
+| Method  | Path                      | Purpose                                 |
+| ------- | ------------------------- | --------------------------------------- |
+| GET     | `/api/health`           | Health check                            |
+| POST    | `/api/jobs`             | Create a path-based processing job      |
+| POST    | `/api/jobs/upload`      | Create an upload-based processing job   |
+| GET     | `/api/jobs/{id}`        | Read job status and summary             |
+| GET     | `/api/jobs/{id}/events` | Stream progress and log events over SSE |
+| GET     | `/api/jobs/{id}/pdf`    | Download the final PDF                  |
+| GET/PUT | `/api/settings`         | Read or update Web2 settings            |
+| GET     | `/api/staff`            | Read staff mappings from a store list   |
+
+### Automation API (`8090`)
+
+| Method | Path                                   | Purpose                             |
+| ------ | -------------------------------------- | ----------------------------------- |
+| POST   | `/api/automation/jobs`               | Start an automation job             |
+| GET    | `/api/automation/jobs/{id}`          | Read automation job status          |
+| GET    | `/api/automation/jobs/{id}/events`   | Stream merged leveled logs over SSE |
+| GET    | `/api/automation/jobs/{id}/files`    | Read source and final file metadata |
+| GET    | `/api/automation/jobs/{id}/download` | Download the final PDF              |
+| POST   | `/api/automation/jobs/{id}/print`    | Print a ready PDF                   |
+
+## 8. Configuration Reference
+
+The automation service reads `apps/automation/.env` through
+`apps/automation/src/config/environment.ts`.
+
+| Variable                       | Default                                | Notes                                    |
+| ------------------------------ | -------------------------------------- | ---------------------------------------- |
+| `AUTOMATION_HOST`            | `127.0.0.1`                          | Bind address                             |
+| `AUTOMATION_PORT`            | `8090`                               | Automation API port                      |
+| `WEB2_BASE_URL`              | `http://127.0.0.1:8088`              | Python Web2 base URL                     |
+| `WEB2_LIST_FILE`             | `../../MCH.csv`                      | Store list used for processing           |
+| `CIRCLEK_BASE_URL`           | none                                   | Required login URL                       |
+| `CIRCLEK_USERNAME`           | none                                   | Required; keep secret                    |
+| `CIRCLEK_PASSWORD`           | none                                   | Required; keep secret                    |
+| `CIRCLEK_HEADLESS`           | `true`                               | Set`false` for local browser diagnosis |
+| `AUTOMATION_OUTPUT_DIR`      | none                                   | Required output directory                |
+| `PRINTER_NAME`               | `Brother HL-L2320D series`           | Windows printer queue                    |
+| `PRINT_TIMEOUT_MS`           | `90000`                              | Print operation timeout                  |
+| `AUTOMATION_DATABASE_PATH`   | `../../storage/db/automation.sqlite` | SQLite log database                      |
+| `LOG_RETENTION_DAYS`         | `3`                                  | Log cleanup retention                    |
+| `AUTOMATION_ALLOWED_ORIGINS` | localhost Web2 origins                 | CORS allow-list                          |
+
+Relative paths are resolved from the `apps/automation` working directory.
+For production, use absolute paths when the service is launched by a task
+or Windows service.
+
+## 9. Production Use
+
+The current production deployment is a Windows-hosted, local-only setup.
+The printer is USB-connected to the same machine that runs the automation
+service.
+
+### 9.1 Production preparation
+
+1. Create a dedicated Windows account or service account with access to the
+   Circle K account, output folders, printer queue, and SumatraPDF.
+2. Install the pinned Python and Node.js versions listed above.
+3. Create the virtual environment and run `pip install -r requirements.txt`.
+4. Run `npm install` in `apps/automation`.
+5. Create `.env` from `apps/automation/.env.example` and use absolute paths
+   for output, print script, and database where appropriate.
+6. Confirm the printer queue with `Get-Printer` and set the exact queue name
+   in `PRINTER_NAME`.
+7. Confirm Web2 health, a test PDF, and a test print before processing real
+   POs.
+
+### 9.2 Production startup
+
+Start Web2 first, then the automation service:
+
+```powershell
+.venv\Scripts\python.exe src\web_app.py
+```
+
+```powershell
+Set-Location apps\automation
+npm start
+```
+
+Keep the dashboard bound to localhost unless an authenticated reverse proxy
+and an explicit remote-access design are in place. The application does not
+yet provide built-in authentication, automatic Windows service installation,
+or restart recovery for in-flight jobs.
+
+### 9.3 Production checklist
+
+- Back up `storage/db/automation.sqlite` and required output directories.
+- Monitor `po_merge_tool.log` and the automation process output.
+- Keep `storage/`, `output/`, `.env`, and production PDFs out of commits.
+- Test PDF download after every Web2 or Node deployment.
+- Test printing with the configured queue after printer or Windows changes.
+- Review retained logs before changing `LOG_RETENTION_DAYS`.
+- Do not expose port `8090` directly to the public internet.
+
+## 10. Runtime Data and Troubleshooting
+
+| Data                    | Location                                 |
+| ----------------------- | ---------------------------------------- |
+| Web2 settings           | `%APPDATA%\LPA_POP\settings.json`      |
+| Web2 log                | `po_merge_tool.log`                    |
+| Web2 job files          | `%APPDATA%\LPA_POP\jobs`               |
+| Automation output       | `output/` or `AUTOMATION_OUTPUT_DIR` |
+| Automation log database | `storage/db/automation.sqlite`         |
+
+Common checks:
+
+- **Dashboard does not load:** start Web2 and use port `8088`.
+- **Automation cannot start:** check required `.env` values and run
+  `npm run build`.
+- **Processing fails:** verify Web2 is reachable and `WEB2_LIST_FILE` exists.
+- **Print fails:** verify the Windows queue name, SumatraPDF files, file
+  permissions, and `PRINT_TIMEOUT_MS`.
+- **Circle K login fails:** set `CIRCLEK_HEADLESS=false` for local diagnosis;
+  never record credentials in screenshots or logs.
+
+## 11. Desktop Build
+
+The current PyInstaller build targets the desktop GUI:
+
+```powershell
 compile\build.bat
 ```
 
-EXE hiện tại vẫn là GUI Tk. Web EXE (bundle uvicorn) làm bước sau.
-
----
-
-## 6. Lưu ý
-
-- Log file: `po_merge_tool.log`. Settings: `%APPDATA%\LPA_POP\settings.json`.
-- CSV 1–3 cột: mã, tên cửa hàng, staff.
-- Merge xong: cảnh báo mã thiếu/dư, ghi qty (đã chia 2) lên từng trang.
-
----
-
-## 1. Yêu cầu hệ thống
-
-- Python 3.8 trở lên
-- Windows
-- Các thư viện: PyPDF2, pdfplumber, pillow, PyMuPDF (fitz)
-
----
-
-## 2. Cài đặt môi trường
-
-### a. Tạo môi trường ảo
-
-```sh
-python -m venv .venv
-.venv\Scripts\activate
-```
-
-### b. Cài đặt các thư viện cần thiết
-
-```sh
-pip install -r requirements.txt
-```
-
----
-
-## 3. Sử dụng script
-
-### a. Chạy bằng giao diện đồ họa (GUI)
-
-```sh
-python po_merge_tool_gui.py --gui
-```
-
-### b. Chạy bằng dòng lệnh (CLI)
-
-```sh
-python po_merge_tool_gui.py --input-folder ./pdfs --list-file stores.csv --output PO_FINAL.pdf
-```
-
-**Tham số:**
-
-- `--input-folder`: Thư mục chứa các file PDF cần hợp nhất
-- `--input-files`: Danh sách file PDF hoặc thư mục (có thể truyền nhiều)
-- `--list-file`: File danh sách mã cửa hàng (CSV hoặc TXT)
-  - CSV có thể 1 cột (mỗi dòng 1 mã) hoặc 2 cột (cột 1: mã, cột 2: tên cửa hàng). Nếu có tên, log thiếu mã theo từng mã sẽ kèm tên.
-- `--output`: Đường dẫn file PDF kết quả
-- `--pattern`: Regex để nhận diện mã PO (mặc định: `SG\d{4}`)
-
-Gợi ý: có thể truyền nhiều file theo `--input-files` hoặc chỉ định 1 thư mục qua `--input-folder`.
-
----
-
-## 4. Build file EXE (Windows)
-
-### a. Sử dụng file build.bat
-
-```sh
-compile\build.bat
-```
-
-File build.bat sẽ tự động:
-
-- Cài đặt PyInstaller nếu chưa có
-- Xóa build cũ
-- Build EXE với icon và font
-- Refresh Windows icon cache
-- Tạo file EXE trong thư mục `dist`
-
-### b. Build thủ công (nếu cần tùy chỉnh)
-
-```sh
-pyinstaller --onefile --windowed --name "PO Management Tool" --icon "assets/icon/app.ico" src/po_merge_tool_gui.py --add-data "assets/font/Roboto-ExtraBold.ttf;font" --add-data "assets/icon;icon" --clean
-```
-
-### c. Chạy file EXE
-
-```sh
-dist\PO Management Tool.exe
-```
-
----
-
-## 5. Lưu ý
-
-- File log sẽ được ghi tại `po_merge_tool.log`.
-- Danh sách mã (`--list-file`) có thể là TXT (mỗi dòng 1 mã) hoặc CSV (1 hoặc 2 cột). Khi CSV có 2 cột, log thiếu mã theo từng mã sẽ hiển thị "mã - tên".
-- Khi hợp nhất xong, công cụ sẽ: (1) cảnh báo "thiếu" và "dư" mã, (2) cộng tổng số lượng sau chia 2 và log theo định dạng: `Tổng số lượng ngày DD/MM/YYYY: <tổng>`.
-- Công cụ thêm số lượng (đã chia 2) vào góc phải dưới của từng trang bằng font hệ thống `helv`.
-- Nếu gặp lỗi về Tkinter, hãy kiểm tra lại cài đặt Python hoặc dùng CLI.
-
----
-
-## 6. Liên hệ & hỗ trợ
-
-Liên hệ IT hoặc người phát triển nếu cần hỗ trợ
+The Node automation service is currently run from source with `npm start`.
+Windows service installation and one-click startup are separate deployment
+work and are not included in this repository yet.

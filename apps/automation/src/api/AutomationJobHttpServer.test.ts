@@ -93,6 +93,7 @@ test("streams persisted automation logs as SSE", async () => {
     const chunk = await response.body?.getReader().read();
     assert.ok(chunk?.value);
     assert.match(new TextDecoder().decode(chunk.value), /WARNING/);
+  } finally {
     controller.abort();
     await close(server); logStore.close(); await rm(directory, { recursive: true, force: true });
   }

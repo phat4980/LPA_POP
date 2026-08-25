@@ -5,36 +5,89 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="automation-api-base" content="http://127.0.0.1:8090" />
   <title>PO Automation Dashboard</title>
-  <link rel="stylesheet" href="automation.css" />
+  <link rel="stylesheet" href="automation.css?v=20260825" />
 </head>
 <body x-data="automationDashboard()" x-init="init()" @unload="destroy()">
   <main class="dashboard-shell">
-    <div class="brand-row"><div class="logo-placeholder" title="Logo placeholder - thay bang file PNG that"></div><div class="eyebrow">Lưu Phát Anh</div></div>
+    <div class="brand-row">
+      <div class="logo-placeholder" title="Logo placeholder - thay bang file PNG that"></div>
+      <div class="eyebrow">Lưu Phát Anh</div>
+    </div>
     <h1>Quy trình làm phiếu PO</h1>
 
     <section x-show="view === 'idle'" class="state-view" aria-labelledby="start-title">
       <h2 id="start-title" class="sr-only">Bắt đầu quy trình</h2>
-      <div class="field"><label for="delivery-date">Ngày giao hàng</label><input id="delivery-date" type="date" x-model="deliveryDate" /></div>
-      <div class="toggle-row"><div><div class="toggle-label">Tự động in</div><div class="toggle-sub">In ngay khi file PDF sẵn sàng</div></div><label class="switch"><input type="checkbox" x-model="autoPrint" /><span class="track"><span class="thumb"></span></span></label></div>
-      <details class="print-options" :open="printOptionsOpen"><summary @click.prevent="printOptionsOpen = !printOptionsOpen"><span>Tùy chọn in (không bắt buộc)</span><span class="chevron">›</span></summary><div class="options-body">
-        <div class="field"><label for="copies">Số bản</label><input id="copies" type="number" min="1" max="20" x-model.number="copies" /></div>
-        <div class="field"><label for="page-range">Trang in (vd: 1-3,5)</label><input id="page-range" type="text" placeholder="Toàn bộ trang" x-model="pageRange" /></div>
-        <div class="field"><label for="paper-size">Khổ giấy</label><select id="paper-size" x-model="paperSize"><option value="A4">A4</option><option value="Letter">Letter</option><option value="A5">A5</option></select></div>
-        <div class="field"><label>Hướng giấy</label><div class="segmented"><button type="button" :class="{ active: layout === 'portrait' }" @click="layout = 'portrait'">Dọc</button><button type="button" :class="{ active: layout === 'landscape' }" @click="layout = 'landscape'">Ngang</button></div></div>
-        <div class="field"><label for="fit-mode">Co giãn</label><select id="fit-mode" x-model="fitMode"><option value="fit">Vừa trang</option><option value="noscale">Kích thước gốc</option><option value="shrink">Chỉ thu nhỏ</option></select></div>
-      </div></details>
-      <p x-show="errorMessage" class="inline-note" x-text="errorMessage"></p><button class="btn-primary" type="button" @click="execute()" :disabled="isRunning">Bắt đầu</button>
+      <div class="field">
+        <label for="delivery-date">Ngày giao hàng</label>
+        <input id="delivery-date" type="date" x-model="deliveryDate" />
+      </div>
+      <div class="toggle-row">
+        <div>
+          <div class="toggle-label">Tự động in</div>
+          <div class="toggle-sub">In ngay khi file PDF sẵn sàng</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" x-model="autoPrint" />
+          <span class="track"><span class="thumb"></span></span>
+        </label>
+      </div>
+      <details class="print-options" :open="printOptionsOpen">
+        <summary @click.prevent="printOptionsOpen = !printOptionsOpen">
+          <span>Tùy chọn in (không bắt buộc)</span><span class="chevron">›</span>
+        </summary>
+        <div class="options-body">
+          <div class="field"><label for="copies">Số bản</label><input id="copies" type="number" min="1" max="20" x-model.number="copies" /></div>
+          <div class="field"><label for="page-range">Trang in (vd: 1-3,5)</label><input id="page-range" type="text" placeholder="Toàn bộ trang" x-model="pageRange" /></div>
+          <div class="field"><label for="paper-size">Khổ giấy</label><select id="paper-size" x-model="paperSize"><option value="A4">A4</option><option value="Letter">Letter</option><option value="A5">A5</option></select></div>
+          <div class="field"><label>Hướng giấy</label><div class="segmented"><button type="button" :class="{ active: layout === 'portrait' }" @click="layout = 'portrait'">Dọc</button><button type="button" :class="{ active: layout === 'landscape' }" @click="layout = 'landscape'">Ngang</button></div></div>
+          <div class="field"><label for="fit-mode">Co giãn</label><select id="fit-mode" x-model="fitMode"><option value="fit">Vừa trang</option><option value="noscale">Kích thước gốc</option><option value="shrink">Chỉ thu nhỏ</option></select></div>
+        </div>
+      </details>
+      <p x-show="errorMessage" class="inline-note" x-text="errorMessage"></p>
+      <button class="btn-primary" type="button" @click="execute()" :disabled="isRunning">Bắt đầu</button>
     </section>
 
-    <section x-show="view === 'running'" class="state-view"><div class="ticket" aria-live="polite"><div class="step-chip"><span class="dot"></span><span x-text="statusLabel"></span></div><div class="progress-track"><div class="progress-fill" :style="`width: ${progress}%`"></div></div><div class="progress-meta"><span x-text="`${progress}%`"></span><span x-text="statusLabel"></span></div></div><div class="log-panel"><div class="log-header"><span class="log-title">Nhật ký xử lý</span><div class="log-actions"><button type="button" @click="copyLog()">Copy</button><button type="button" @click="downloadLog()">Tải log</button></div></div><div class="log-filters"><button type="button" :class="{ active: logFilter === 'ALL' }" @click="logFilter = 'ALL'">Tất cả</button><button type="button" :class="{ active: logFilter === 'INFO' }" @click="logFilter = 'INFO'">Info</button><button type="button" :class="{ active: logFilter === 'WARNING' }" @click="logFilter = 'WARNING'">Warning</button><button type="button" :class="{ active: logFilter === 'ERROR' }" @click="logFilter = 'ERROR'">Error</button></div><div class="log-body" x-ref="logBody"><template x-if="visibleLogs.length"><template x-for="entry in visibleLogs" :key="entry.id"><div class="log-line" :class="entry.level"><span class="ts" x-text="entry.ts"></span><span class="msg" x-text="`${entry.level}: ${entry.message}`"></span></div></template></template><div x-show="!visibleLogs.length" class="log-empty">Chưa có nhật ký</div></div></div><button class="btn-primary" type="button" disabled>Đang xử lý...</button></section>
+    <section x-show="view === 'running'" class="state-view">
+      <div class="ticket" aria-live="polite">
+        <div class="step-chip"><span class="dot"></span><span x-text="statusLabel"></span></div>
+        <div class="progress-track"><div class="progress-fill" :style="`width: ${progress}%`"></div></div>
+        <div class="progress-meta"><span x-text="`${progress}%`"></span><span x-text="statusLabel"></span></div>
+      </div>
+      <button class="btn-primary" type="button" disabled>Đang xử lý...</button>
+    </section>
 
-    <section x-show="view === 'success' || view === 'printFailed' || view === 'printed'" class="state-view"><div class="status-block" :class="view === 'printFailed' ? 'error' : 'success'"><div class="status-icon" :class="view === 'printFailed' ? 'error' : 'success'" x-text="view === 'printFailed' ? '!' : '✓'"></div><div class="status-text" :class="view === 'printFailed' ? 'error' : 'success'"><div class="title" x-text="view === 'printFailed' ? 'Chưa in được' : 'Hoàn tất'"></div><div class="desc" x-text="view === 'printFailed' ? 'File PDF vẫn được giữ lại để thử in lại.' : 'File PDF đã sẵn sàng để tải về hoặc in.'"></div></div></div>
+    <section x-show="view === 'success' || view === 'printFailed' || view === 'printed'" class="state-view">
+      <div class="status-block" :class="view === 'printFailed' ? 'error' : 'success'">
+        <div class="status-icon" :class="view === 'printFailed' ? 'error' : 'success'" x-text="view === 'printFailed' ? '!' : '✓'"></div>
+        <div class="status-text" :class="view === 'printFailed' ? 'error' : 'success'"><div class="title" x-text="view === 'printFailed' ? 'Chưa in được' : 'Hoàn tất'"></div><div class="desc" x-text="view === 'printFailed' ? 'File PDF vẫn được giữ lại để thử in lại.' : 'File PDF đã sẵn sàng để tải về hoặc in.'"></div></div>
+      </div>
       <div class="pdf-preview" x-show="job?.finalFile"><div class="pdf-icon">PDF</div><div class="pdf-meta"><div class="name" x-text="job?.finalFile?.name || 'File PDF'"></div><div class="size">File PDF đã sẵn sàng</div></div></div>
-      <div class="btn-row"><button class="btn-back" type="button" @click="resetForRetry()">← Về trang đầu</button><a class="btn-secondary" :href="downloadUrl" download>Tải về</a><button class="btn-primary-sm" type="button" @click="print()" :disabled="isPrinting" x-text="view === 'printFailed' ? 'Thử in lại' : view === 'printed' ? 'In lại' : 'In'"></button></div><div x-show="view === 'printFailed'" class="inline-note">⚠ In thất bại - thử lại hoặc tải file về để in thủ công.</div><div x-show="view === 'printed'" class="badge">✓ Đã in xong</div>
+      <div class="btn-row"><button class="btn-back" type="button" @click="resetForRetry()">← Về trang đầu</button><a class="btn-secondary" :href="downloadUrl" download>Tải về</a><button class="btn-primary-sm" type="button" @click="print()" :disabled="isPrinting" x-text="view === 'printFailed' ? 'Thử in lại' : view === 'printed' ? 'In lại' : 'In'"></button></div>
+      <div x-show="view === 'printFailed'" class="inline-note">⚠ In thất bại - thử lại hoặc tải file về để in thủ công.</div><div x-show="view === 'printed'" class="badge">✓ Đã in xong</div>
     </section>
 
-    <section x-show="view === 'failure'" class="state-view"><div class="status-block error"><div class="status-icon error">!</div><div class="status-text error"><div class="title">Không thể hoàn tất quy trình</div><div class="desc" x-text="errorMessage"></div></div></div><div class="pdf-preview" x-show="job?.finalFile"><div class="pdf-icon">PDF</div><div class="pdf-meta"><div class="name" x-text="job?.finalFile?.name || 'File PDF'"></div><div class="size">File PDF đã sẵn sàng</div></div></div><button class="btn-primary" type="button" @click="resetForRetry()">Thử lại</button></section>
+    <section x-show="view === 'failure'" class="state-view">
+      <div class="status-block error"><div class="status-icon error">!</div><div class="status-text error"><div class="title">Không thể hoàn tất quy trình</div><div class="desc" x-text="errorMessage"></div></div></div>
+      <div class="pdf-preview" x-show="job?.finalFile"><div class="pdf-icon">PDF</div><div class="pdf-meta"><div class="name" x-text="job?.finalFile?.name || 'File PDF'"></div><div class="size">File PDF đã sẵn sàng</div></div></div>
+      <button class="btn-primary" type="button" @click="resetForRetry()">Thử lại</button>
+    </section>
+
+    <section class="log-panel" aria-labelledby="log-title">
+      <div class="log-header">
+        <span id="log-title" class="log-title">Nhật ký xử lý</span>
+        <div class="log-actions"><button type="button" @click="copyLog()" :disabled="!logs.length">Copy</button><button type="button" @click="downloadLog()" :disabled="!logs.length">Tải log</button></div>
+      </div>
+      <div class="log-filters" role="group" aria-label="Lọc nhật ký">
+        <button type="button" :class="{ active: logFilter === 'ALL' }" @click="logFilter = 'ALL'">Tất cả</button><button type="button" :class="{ active: logFilter === 'INFO' }" @click="logFilter = 'INFO'">Info</button><button type="button" :class="{ active: logFilter === 'WARNING' }" @click="logFilter = 'WARNING'">Warning</button><button type="button" :class="{ active: logFilter === 'ERROR' }" @click="logFilter = 'ERROR'">Error</button>
+      </div>
+      <div class="log-body" x-ref="logBody">
+        <template x-for="entry in visibleLogs" :key="entry.clientId"><div class="log-line" :class="entry.level"><span class="ts" x-text="entry.ts"></span><span class="msg" x-text="`${entry.level}: ${entry.message}`"></span></div></template>
+        <div x-show="!visibleLogs.length" class="log-empty" x-text="job ? 'Đang chờ nhật ký...' : 'Chưa có nhật ký'"></div>
+      </div>
+    </section>
   </main>
-  <script src="js/automation-api.js"></script><script src="js/automation-app.js"></script><script src="vendor/alpinejs/alpine.min.js" defer></script>
+  <script src="js/automation-api.js"></script>
+  <script src="js/automation-app.js"></script>
+  <script src="vendor/alpinejs/alpine.min.js" defer></script>
 </body>
 </html>

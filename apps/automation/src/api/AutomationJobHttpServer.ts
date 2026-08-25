@@ -74,11 +74,16 @@ async function route(request: IncomingMessage, response: ServerResponse, service
   if (match[2] === "events" && request.headers.accept?.includes("text/event-stream") && logHub) {
     response.writeHead(200, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "keep-alive" });
     const write = (entry: unknown) => response.write(`event: log\ndata: ${JSON.stringify({ type: "log", entry })}\n\n`);
+    let replaying = true;
+    const pending: unknown[] = [];
+    const unsubscribe = logHub.subscribe(id, (entry) => { if (replaying) pending.push(entry); else write(entry); });
     for (const entry of logHub.list(id)) write(entry);
-    const unsubscribe = logHub.subscribe(id, write);
+    replaying = false;
+    for (const entry of pending) write(entry);
     request.once("close", () => { unsubscribe(); response.end(); });
     return;
   }
+  if (!job) return respond(response, 404, { error: "Job not found" });
   if (match[2] === "events") return respond(response, 200, service.getJobEvents(id) ?? []);
   if (match[2] === "files") return respond(response, 200, { sourceFiles: job.sourceFiles, finalFile: job.finalFile });
   return respond(response, 200, job);

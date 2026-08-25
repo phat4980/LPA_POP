@@ -689,7 +689,7 @@ The existing Web 2 must remain independently runnable throughout this work.
 | Phase 5 - Web 2 integration                        | DONE                                                            | -                                                                    |
 | Phase 6 - Automation jobs                          | DONE (in-memory; persistence in 8.1)                            | -                                                                    |
 | Phase 7 - Dashboard & Printing                     | DONE, running in production for the client                      | -                                                                    |
-| **Phase 7.4 - Log panel & Back button**            | **TODO - mockup direction approved**                            | Wire SSE forwarding + filter UI into `web/automation.html`         |
+| **Phase 7.4 - Log panel & Back button**            | **DONE - verified with automated SSE and SQLite coverage**       | -                                                                  |
 | **Phase 8.1 - SQLite job+log (pulled forward)**    | **TODO - prioritized right after 7.4**                          | `jobs`/`logs` schema, restart recovery, localStorage resume        |
 | Phase 8.2-8.6 - Reliability/security (remainder)   | TODO - after the happy path                                    | Deep retries, redaction, manifests                                  |
 | **Phase 9 - One-click startup**                    | **TODO**                                                        | NSSM services + auto-opening launcher                              |

@@ -85,47 +85,38 @@ export class Web2Client {
 
   subscribeToJobEvents(jobId: string, onLog: (entry: Web2LogEntry) => void): () => void {
     const controller = new AbortController();
+    const seen = new Set<string>();
+    const emit = (entry: { time?: string; level?: string; message?: string }): void => {
+      if (!entry.message) return;
+      const level = entry.level === "ERROR" ? "ERROR" : entry.level === "WARNING" || entry.level === "WARN" ? "WARNING" : "INFO";
+      const normalized = { ts: entry.time ?? new Date().toISOString(), level, message: entry.message } as Web2LogEntry;
+      const key = `${normalized.ts}\u0000${normalized.level}\u0000${normalized.message}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      onLog(normalized);
+    };
     void (async () => {
       try {
-        const snapshotResponse = await this.request(`/api/jobs/${encodeURIComponent(jobId)}`);
-        const snapshot = await this.parseJson<Web2Job>(snapshotResponse);
-        for (const entry of snapshot.logs ?? []) {
-          if (!entry.message) continue;
-          const level = entry.level === "ERROR" ? "ERROR" : entry.level === "WARNING" || entry.level === "WARN" ? "WARNING" : "INFO";
-          onLog({ ts: entry.time ?? new Date().toISOString(), level, message: entry.message });
-        }
-        const response = await fetch(`${this.options.baseUrl}/api/jobs/${encodeURIComponent(jobId)}/events`, { signal: controller.signal, headers: { Accept: "text/event-stream" } });
-        if (!response.ok || !response.body) return;
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
         while (!controller.signal.aborted) {
-          const chunk = await reader.read();
-          if (chunk.done) break;
-          buffer += decoder.decode(chunk.value, { stream: true });
-          const events = buffer.split(/\r?\n\r?\n/);
-          buffer = events.pop() ?? "";
-          for (const event of events) {
-            const data = event.split(/\r?\n/).find((line) => line.startsWith("data:"))?.slice(5).trim();
-            if (!data) continue;
-            try {
-              const parsed = JSON.parse(data) as { entry?: { time?: string; level?: string; message?: string } };
-              const entry = parsed.entry;
-              if (!entry?.message) continue;
-              const level = entry.level === "ERROR" ? "ERROR" : entry.level === "WARNING" || entry.level === "WARN" ? "WARNING" : "INFO";
-              onLog({ ts: entry.time ?? new Date().toISOString(), level, message: entry.message });
-            } catch { /* Ignore malformed SSE records. */ }
-          }
+          const snapshotResponse = await this.request(`/api/jobs/${encodeURIComponent(jobId)}`, { signal: controller.signal });
+          const snapshot = await this.parseJson<Web2Job>(snapshotResponse);
+          for (const entry of snapshot.logs ?? []) emit(entry);
+          if (snapshot.status === "done" || snapshot.status === "error") break;
+          await new Promise<void>((resolvePromise) => {
+            const timer = setTimeout(resolvePromise, 500);
+            controller.signal.addEventListener("abort", () => { clearTimeout(timer); resolvePromise(); }, { once: true });
+          });
         }
       } catch { /* A log stream must never fail the automation job. */ }
     })();
     return () => controller.abort();
   }
 
-  private async request(path: string, init?: RequestInit): Promise<Response> {
+  private async request(path: string, init: RequestInit = {}): Promise<Response> {
+    const timeoutSignal = AbortSignal.timeout(this.options.requestTimeoutMs ?? 30_000);
     const response = await fetch(`${this.options.baseUrl}${path}`, {
       ...init,
-      signal: AbortSignal.timeout(this.options.requestTimeoutMs ?? 30_000),
+      signal: init.signal ? AbortSignal.any([init.signal, timeoutSignal]) : timeoutSignal,
     });
     if (!response.ok) {
       throw new Error(`Web 2 request failed with status ${response.status}.`);
