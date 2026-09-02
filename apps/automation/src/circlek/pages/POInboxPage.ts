@@ -36,10 +36,36 @@ export class POInboxPage extends BasePage {
   }
 
   async selectDeliveryDate(targetDate: Date): Promise<void> {
-    const fromInput = this.page.locator(poInboxLocators.deliveryDateFrom.selector);
+    const fromSelector = poInboxLocators.deliveryDateFrom.selector;
+    const toSelector = poInboxLocators.deliveryDateTo.selector;
+    const fmt = (d: Date) => `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
+    const targetStr = fmt(targetDate);
+    const beforeFrom = await this.page.locator(fromSelector).inputValue().catch(() => "<read-fail>");
+    const beforeTo = await this.page.locator(toSelector).inputValue().catch(() => "<read-fail>");
+    console.log(`[DIAG][POInbox] selectDeliveryDate target=${targetStr} before From="${beforeFrom}" To="${beforeTo}"`);
+    const fromInput = this.page.locator(fromSelector);
     await new DatePicker(this.page, fromInput).selectDate(targetDate);
-    const toInput = this.page.locator(poInboxLocators.deliveryDateTo.selector);
+    const afterFromFrom = await this.page.locator(fromSelector).inputValue().catch(() => "<read-fail>");
+    const afterFromTo = await this.page.locator(toSelector).inputValue().catch(() => "<read-fail>");
+    console.log(`[DIAG][POInbox] after From select From="${afterFromFrom}" To="${afterFromTo}" (expected From=${targetStr})`);
+    // Small pause to let BizTrade JS auto-sync settle (critical for current date where other field auto-empties)
+    await this.page.waitForTimeout(400);
+    const toInput = this.page.locator(toSelector);
     await new DatePicker(this.page, toInput).selectDate(targetDate);
+    const afterToFrom = await this.page.locator(fromSelector).inputValue().catch(() => "<read-fail>");
+    const afterToTo = await this.page.locator(toSelector).inputValue().catch(() => "<read-fail>");
+    console.log(`[DIAG][POInbox] after To select From="${afterToFrom}" To="${afterToTo}" (expected both=${targetStr})`);
+    await this.page.waitForTimeout(400);
+    const finalFrom = await this.page.locator(fromSelector).inputValue().catch(() => "<read-fail>");
+    const finalTo = await this.page.locator(toSelector).inputValue().catch(() => "<read-fail>");
+    console.log(`[DIAG][POInbox] FINAL before search From="${finalFrom}" To="${finalTo}"`);
+    // Capture screenshot for UAT evidence — never fail the job if screenshot fails
+    try {
+      await this.page.screenshot({ path: `storage/jobs/diag-${Date.now()}.png`, fullPage: false });
+    } catch {}
+    if (finalFrom !== targetStr || finalTo !== targetStr) {
+      throw new Error(`Date picker sync failed: expected both=${targetStr} but got From="${finalFrom}" To="${finalTo}"`);
+    }
   }
 
   async getDeliveryDateValue(): Promise<string> {

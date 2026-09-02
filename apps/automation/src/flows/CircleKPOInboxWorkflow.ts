@@ -21,8 +21,14 @@ export async function loginToCircleK(config: AutomationConfig, targetDate: Date)
     const page = await session.createPage();
     const loginPage = new LoginPage(page, config);
     const poInboxPage = new POInboxPage(page);
-    await loginPage.open(); await loginPage.login(); await poInboxPage.open(); await poInboxPage.selectDeliveryDate(targetDate);
+    await loginPage.open(); await loginPage.login(); await poInboxPage.open();
+    console.log(`[DIAG][Workflow] loginToCircleK targetDate=${targetDate.toISOString().slice(0,10)} fmt=${String(targetDate.getDate()).padStart(2,"0")}/${String(targetDate.getMonth()+1).padStart(2,"0")}/${targetDate.getFullYear()}`);
+    await poInboxPage.selectDeliveryDate(targetDate);
+    const diagFrom = await poInboxPage.getDeliveryDateValue().catch(() => "<fail>");
+    const diagTo = await poInboxPage.getDeliveryDateToValue().catch(() => "<fail>");
+    console.log(`[DIAG][Workflow] before search From="${diagFrom}" To="${diagTo}"`);
     const searchResult = await poInboxPage.search();
+    console.log(`[DIAG][Workflow] after search result=${JSON.stringify(searchResult)}`);
     return { session, page, poInboxPage, targetDate, searchResult, pagination: null, pdfDownloadService: new PdfDownloadService() };
   } catch (error) { await session.close(); throw error; }
 }

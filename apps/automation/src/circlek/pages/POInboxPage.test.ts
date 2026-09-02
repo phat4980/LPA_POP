@@ -19,6 +19,7 @@ test("POInboxPage.selectDeliveryDate fills BOTH From and To with same date (past
         constructor(private page: unknown, private input: { _selector: string }) {}
         async selectDate(date: Date) {
           calls.push({ selector: (this.input as unknown as { _selector: string })._selector, date });
+          (this.page as { __setLastTarget?: (d: Date) => void })?.__setLastTarget?.(date);
         }
       },
     },
@@ -26,15 +27,25 @@ test("POInboxPage.selectDeliveryDate fills BOTH From and To with same date (past
 
   // Mock page.locator to return an object carrying selector for assertion
   function createMockPage() {
+    let lastTargetStr = "";
+    const fmt = (d: Date) => `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
+    // Patch DatePicker mock to update lastTargetStr is handled via calls array closure above
     return {
       locator(selector: string) {
-        return { _selector: selector } as unknown as { _selector: string };
+        return {
+          _selector: selector,
+          inputValue: async () => lastTargetStr || "",
+        } as unknown as { _selector: string };
       },
+      waitForTimeout: async () => {},
+      screenshot: async () => Buffer.from(""),
       getByRole: () => ({ hover: async () => {}, click: async () => {} }),
       getByText: () => ({ count: async () => 1, click: async () => {} }),
       waitForLoadState: async () => {},
       title: async () => "Inbox Đơn Đặt Hàng",
-    } as unknown as import("playwright").Page;
+      // Expose helper for DatePicker mock to sync
+      __setLastTarget: (d: Date) => { lastTargetStr = fmt(d); },
+    } as unknown as import("playwright").Page & { __setLastTarget: (d: Date) => void };
   }
 
   const { POInboxPage } = await import("./POInboxPage.js");
