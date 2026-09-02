@@ -36,12 +36,18 @@ export class POInboxPage extends BasePage {
   }
 
   async selectDeliveryDate(targetDate: Date): Promise<void> {
-    const input = this.page.locator(poInboxLocators.deliveryDateFrom.selector);
-    await new DatePicker(this.page, input).selectDate(targetDate);
+    const fromInput = this.page.locator(poInboxLocators.deliveryDateFrom.selector);
+    await new DatePicker(this.page, fromInput).selectDate(targetDate);
+    const toInput = this.page.locator(poInboxLocators.deliveryDateTo.selector);
+    await new DatePicker(this.page, toInput).selectDate(targetDate);
   }
 
   async getDeliveryDateValue(): Promise<string> {
     return this.page.locator(poInboxLocators.deliveryDateFrom.selector).inputValue();
+  }
+
+  async getDeliveryDateToValue(): Promise<string> {
+    return this.page.locator(poInboxLocators.deliveryDateTo.selector).inputValue();
   }
 
   async verifyUsable(): Promise<void> {

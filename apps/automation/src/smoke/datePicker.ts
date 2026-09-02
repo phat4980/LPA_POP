@@ -26,11 +26,12 @@ try {
   console.log("Date picker opened: yes");
   console.log("Target date selected: yes");
 
-  const actualValue = await poInboxPage.getDeliveryDateValue();
-  if (actualValue !== expectedValue) {
-    throw new Error("Date picker smoke verification failed.");
+  const actualFrom = await poInboxPage.getDeliveryDateValue();
+  const actualTo = await poInboxPage.getDeliveryDateToValue();
+  if (actualFrom !== expectedValue || actualTo !== expectedValue) {
+    throw new Error(`Date picker smoke verification failed. From=${actualFrom} To=${actualTo} Expected=${expectedValue}`);
   }
-  console.log("Date input verification: passed");
+  console.log(`Date input verification: passed (From=${actualFrom} To=${actualTo})`);
   await new Promise((resolve) => setTimeout(resolve, 5_000));
 } catch {
   console.error("Circle K date picker smoke failed.");

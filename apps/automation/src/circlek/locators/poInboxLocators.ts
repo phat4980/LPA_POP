@@ -13,6 +13,9 @@ export const poInboxLocators = {
   deliveryDateFrom: {
     selector: 'input[name="deliveryDateFrom"]',
   },
+  deliveryDateTo: {
+    selector: 'input[name="deliveryDateTo"]',
+  },
   search: {
     text: "Tìm kiếm",
   },
